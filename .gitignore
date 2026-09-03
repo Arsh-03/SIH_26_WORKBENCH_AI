@@ -22,3 +22,13 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local storage & DBs
+backend/storage/*.db
+backend/storage/*.db-journal
+backend/storage/uploads/*
+!backend/storage/uploads/.gitkeep
+backend/storage/artifacts/*
+!backend/storage/artifacts/.gitkeep
+backend/storage/chroma_db/
+
