@@ -1,6 +1,5 @@
-import React, { useState } from 'react'
+import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import type {
   NavItem,
   PinnedProject,
@@ -16,6 +15,8 @@ import {
   mockUserProfile,
 } from '../../lib/mockData'
 
+import { AmberUnderline } from './AmberUnderline'
+
 export interface SidebarProps {
   pinnedProjects?: PinnedProject[]
   pinnedChats?: PinnedChat[]
@@ -27,36 +28,7 @@ export interface SidebarProps {
   className?: string
 }
 
-/**
- * AmberUnderlineWrapper
- * Implements DESIGN.md Section 6:
- * "Sidebar/text links: amber underline draws left-to-right on hover (~150ms), retracts on hover-out. Never color-only hover."
- */
-const AmberUnderlineWrapper: React.FC<{
-  children: React.ReactNode
-  className?: string
-  active?: boolean
-}> = ({ children, className = '', active = false }) => {
-  const [isHovered, setIsHovered] = useState(false)
-
-  return (
-    <div
-      className={`relative inline-flex items-center ${className}`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
-      {children}
-      <motion.span
-        aria-hidden="true"
-        initial={{ scaleX: 0 }}
-        animate={{ scaleX: active || isHovered ? 1 : 0 }}
-        transition={{ duration: 0.15, ease: 'easeOut' }}
-        style={{ originX: 0 }}
-        className="absolute -bottom-0.5 left-0 right-0 h-[1px] bg-accent-primary pointer-events-none"
-      />
-    </div>
-  )
-}
+const AmberUnderlineWrapper = AmberUnderline
 
 /**
  * Left Sidebar Component

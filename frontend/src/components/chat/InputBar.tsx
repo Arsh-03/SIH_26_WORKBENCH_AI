@@ -1,10 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import type { ScopeFile } from '../../lib/types'
-import { mockScopeFiles } from '../../lib/mockData'
+import { useWorkbench } from '../../lib/WorkbenchContext'
 
 export interface InputBarProps {
-  onSendMessage: (text: string) => void
+  onSendMessage?: (text: string) => void
   isStreaming?: boolean
   onStopStreaming?: () => void
   className?: string
@@ -26,23 +25,30 @@ const SLASH_COMMANDS: SlashCommand[] = [
 
 export const InputBar: React.FC<InputBarProps> = ({
   onSendMessage,
-  isStreaming = false,
-  onStopStreaming,
+  isStreaming: propIsStreaming,
+  onStopStreaming: propOnStopStreaming,
   className = '',
   placeholder = 'Ask a question, propose an edit, or type / for commands…',
 }) => {
+  const {
+    scopeFiles,
+    removeScopeFile,
+    activeTools,
+    toggleTool,
+    isStreaming: ctxIsStreaming,
+    stopStreaming: ctxStopStreaming,
+    sendMessage: ctxSendMessage,
+  } = useWorkbench()
+
+  const isStreaming = propIsStreaming ?? ctxIsStreaming
+  const onStopStreaming = propOnStopStreaming ?? ctxStopStreaming
+
   const [inputText, setInputText] = useState('')
-  const [scopeFiles, setScopeFiles] = useState<ScopeFile[]>(mockScopeFiles)
   const [isAttachmentOpen, setIsAttachmentOpen] = useState(false)
   const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false)
+  const [slashQuery, setSlashQuery] = useState('')
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const [isSendFlashing, setIsSendFlashing] = useState(false)
-
-  // Tool states for Attachment Popover
-  const [activeTools, setActiveTools] = useState({
-    webSearch: true,
-    codeExecution: true,
-    deepResearch: false,
-  })
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -55,25 +61,41 @@ export const InputBar: React.FC<InputBarProps> = ({
     }
   }, [inputText])
 
-  // Detect slash commands
+  // Filter slash commands based on typed query after '/'
+  const filteredSlashCommands = SLASH_COMMANDS.filter((cmd) => {
+    if (!slashQuery) return true
+    const q = slashQuery.toLowerCase()
+    return (
+      cmd.command.slice(1).toLowerCase().includes(q) ||
+      cmd.label.toLowerCase().includes(q) ||
+      cmd.description.toLowerCase().includes(q)
+    )
+  })
+
+  // Detect slash commands and track typed query
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value
     setInputText(val)
-    if (val.startsWith('/') && !val.includes(' ')) {
-      setIsSlashMenuOpen(true)
-    } else {
-      setIsSlashMenuOpen(false)
+
+    if (val.startsWith('/')) {
+      const spaceIdx = val.indexOf(' ')
+      if (spaceIdx === -1) {
+        // Still typing command name, e.g. "/exp"
+        const query = val.slice(1)
+        setSlashQuery(query)
+        setIsSlashMenuOpen(true)
+        setSlashSelectedIndex(0)
+        return
+      }
     }
+    setIsSlashMenuOpen(false)
   }
 
-  // Dismiss scope file with simultaneous fade and collapse
-  const handleRemoveScopeFile = (fileId: string) => {
-    setScopeFiles((prev) => prev.filter((f) => f.id !== fileId))
-  }
-
+  // Insert selected slash command and focus input
   const handleSelectSlash = (cmd: SlashCommand) => {
     setInputText(`${cmd.command} `)
     setIsSlashMenuOpen(false)
+    setSlashQuery('')
     textareaRef.current?.focus()
   }
 
@@ -90,21 +112,75 @@ export const InputBar: React.FC<InputBarProps> = ({
     setIsSendFlashing(true)
     setTimeout(() => setIsSendFlashing(false), 120)
 
-    onSendMessage(inputText.trim())
+    const textToSend = inputText.trim()
     setInputText('')
     setIsSlashMenuOpen(false)
+    setSlashQuery('')
+
+    if (onSendMessage) {
+      onSendMessage(textToSend)
+    } else {
+      ctxSendMessage(textToSend)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Handle slash menu navigation
+    if (isSlashMenuOpen && filteredSlashCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSlashSelectedIndex((prev) => (prev + 1) % filteredSlashCommands.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashSelectedIndex(
+          (prev) => (prev - 1 + filteredSlashCommands.length) % filteredSlashCommands.length
+        )
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        const selected = filteredSlashCommands[slashSelectedIndex]
+        if (selected) {
+          handleSelectSlash(selected)
+        }
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setIsSlashMenuOpen(false)
+        return
+      }
+    }
+
+    // Normal Enter to submit
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
     }
   }
 
+  // Close attachment popover on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node)
+      ) {
+        setIsAttachmentOpen(false)
+      }
+    }
+
+    if (isAttachmentOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isAttachmentOpen])
+
   return (
     <div className={`relative w-full max-w-4xl mx-auto select-none ${className}`}>
-      {/* Context Indicator Strip (DESIGN.md Section 4B) */}
+      {/* Context Indicator Strip (DESIGN.md Section 4B): Reflects real open artifact files */}
       <AnimatePresence>
         {scopeFiles.length > 0 && (
           <div className="flex items-center gap-2 px-3 py-1.5 font-mono text-[10px] text-text-muted">
@@ -115,17 +191,26 @@ export const InputBar: React.FC<InputBarProps> = ({
               {scopeFiles.map((file) => (
                 <motion.div
                   key={file.id}
-                  initial={{ opacity: 1, scale: 1, width: 'auto' }}
-                  exit={{ opacity: 0, scale: 0.8, width: 0 }}
+                  initial={{ opacity: 0, scale: 0.8, width: 0 }}
+                  animate={{ opacity: 1, scale: 1, width: 'auto' }}
+                  exit={{
+                    opacity: 0,
+                    scale: 0.8,
+                    width: 0,
+                    paddingLeft: 0,
+                    paddingRight: 0,
+                    marginLeft: 0,
+                    marginRight: 0,
+                  }}
                   transition={{ duration: 0.15, ease: 'easeOut' }}
-                  className="inline-flex items-center gap-1.5 rounded-[2px] border border-border/80 bg-surface-1 px-2 py-0.5 text-text-body"
+                  className="inline-flex items-center gap-1.5 rounded-[2px] border border-border/80 bg-surface-1 px-2 py-0.5 text-text-body overflow-hidden whitespace-nowrap"
                 >
                   <span className="h-1.5 w-1.5 rounded-full bg-accent-primary shrink-0" />
-                  <span>{file.name}</span>
+                  <span className="truncate max-w-[200px]">{file.name}</span>
                   <button
                     type="button"
-                    onClick={() => handleRemoveScopeFile(file.id)}
-                    className="ml-1 text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+                    onClick={() => removeScopeFile(file.id)}
+                    className="ml-1 text-text-muted hover:text-text-primary transition-colors cursor-pointer text-xs leading-none"
                     aria-label={`Remove ${file.name} from scope`}
                   >
                     ×
@@ -154,7 +239,7 @@ export const InputBar: React.FC<InputBarProps> = ({
 
             <button
               type="button"
-              className="w-full text-left px-2.5 py-1.5 text-xs text-text-body hover:text-text-primary rounded-[2px] transition-colors border-l-2 border-transparent hover:border-accent-primary"
+              className="w-full text-left px-2.5 py-1.5 text-xs text-text-body hover:text-text-primary rounded-[2px] transition-colors border-l-2 border-transparent hover:border-accent-primary cursor-pointer"
             >
               + Add photos & files
             </button>
@@ -167,10 +252,8 @@ export const InputBar: React.FC<InputBarProps> = ({
               {/* Tool Toggle: Web Search */}
               <button
                 type="button"
-                onClick={() =>
-                  setActiveTools((p) => ({ ...p, webSearch: !p.webSearch }))
-                }
-                className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-text-body hover:text-text-primary rounded-[2px] transition-colors border-l-2 border-transparent hover:border-accent-primary"
+                onClick={() => toggleTool('webSearch')}
+                className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-text-body hover:text-text-primary rounded-[2px] transition-colors border-l-2 border-transparent hover:border-accent-primary cursor-pointer"
               >
                 <span>Web search</span>
                 {activeTools.webSearch && (
@@ -181,10 +264,8 @@ export const InputBar: React.FC<InputBarProps> = ({
               {/* Tool Toggle: Code Execution */}
               <button
                 type="button"
-                onClick={() =>
-                  setActiveTools((p) => ({ ...p, codeExecution: !p.codeExecution }))
-                }
-                className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-text-body hover:text-text-primary rounded-[2px] transition-colors border-l-2 border-transparent hover:border-accent-primary"
+                onClick={() => toggleTool('codeExecution')}
+                className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-text-body hover:text-text-primary rounded-[2px] transition-colors border-l-2 border-transparent hover:border-accent-primary cursor-pointer"
               >
                 <span>Code execution</span>
                 {activeTools.codeExecution && (
@@ -195,10 +276,8 @@ export const InputBar: React.FC<InputBarProps> = ({
               {/* Tool Toggle: Deep Research */}
               <button
                 type="button"
-                onClick={() =>
-                  setActiveTools((p) => ({ ...p, deepResearch: !p.deepResearch }))
-                }
-                className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-text-body hover:text-text-primary rounded-[2px] transition-colors border-l-2 border-transparent hover:border-accent-primary"
+                onClick={() => toggleTool('deepResearch')}
+                className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-text-body hover:text-text-primary rounded-[2px] transition-colors border-l-2 border-transparent hover:border-accent-primary cursor-pointer"
               >
                 <span>Deep research</span>
                 {activeTools.deepResearch && (
@@ -212,7 +291,7 @@ export const InputBar: React.FC<InputBarProps> = ({
 
       {/* Slash Command Dropdown */}
       <AnimatePresence>
-        {isSlashMenuOpen && (
+        {isSlashMenuOpen && filteredSlashCommands.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -220,27 +299,38 @@ export const InputBar: React.FC<InputBarProps> = ({
             transition={{ duration: 0.12, ease: 'easeOut' }}
             className="absolute bottom-full left-6 mb-2 w-80 rounded-[4px] border border-border bg-surface-2 p-1.5 shadow-xl z-30 space-y-0.5"
           >
-            <div className="px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-text-muted border-b border-border/40">
-              COMMANDS
+            <div className="flex items-center justify-between px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-text-muted border-b border-border/40">
+              <span>COMMANDS</span>
+              {slashQuery && (
+                <span className="text-accent-primary">matching &ldquo;{slashQuery}&rdquo;</span>
+              )}
             </div>
-            {SLASH_COMMANDS.map((cmd) => (
-              <button
-                key={cmd.command}
-                type="button"
-                onClick={() => handleSelectSlash(cmd)}
-                className="w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[2px] border-l-2 border-transparent hover:border-accent-primary hover:bg-surface-1 transition-colors"
-              >
-                <div className="flex flex-col">
-                  <span className="font-mono text-xs font-semibold text-text-primary">
-                    {cmd.command}
-                  </span>
-                  <span className="font-body text-[11px] text-text-muted">
-                    {cmd.description}
-                  </span>
-                </div>
-                <span className="font-mono text-[10px] text-accent-primary">↵</span>
-              </button>
-            ))}
+            {filteredSlashCommands.map((cmd, idx) => {
+              const isSelected = idx === slashSelectedIndex
+              return (
+                <button
+                  key={cmd.command}
+                  type="button"
+                  onClick={() => handleSelectSlash(cmd)}
+                  onMouseEnter={() => setSlashSelectedIndex(idx)}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[2px] transition-colors cursor-pointer ${
+                    isSelected
+                      ? 'border-l-2 border-accent-primary bg-surface-1 text-text-primary'
+                      : 'border-l-2 border-transparent hover:bg-surface-1/50 text-text-body'
+                  }`}
+                >
+                  <div className="flex flex-col">
+                    <span className="font-mono text-xs font-semibold text-text-primary">
+                      {cmd.command}
+                    </span>
+                    <span className="font-body text-[11px] text-text-muted">
+                      {cmd.description}
+                    </span>
+                  </div>
+                  <span className="font-mono text-[10px] text-accent-primary">↵</span>
+                </button>
+              )
+            })}
           </motion.div>
         )}
       </AnimatePresence>
@@ -256,7 +346,7 @@ export const InputBar: React.FC<InputBarProps> = ({
             </span>
           </div>
           <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">
-            Ready
+            {isStreaming ? 'Synthesizing…' : 'Ready'}
           </span>
         </div>
 
@@ -332,35 +422,62 @@ export const InputBar: React.FC<InputBarProps> = ({
             onClick={() => handleSubmit()}
             animate={{
               scale: isSendFlashing ? 0.94 : 1,
-              filter: isSendFlashing ? 'brightness(1.2)' : 'brightness(1)',
+              filter: isSendFlashing ? 'brightness(1.3)' : 'brightness(1)',
+              backgroundColor: isSendFlashing ? '#F5A66B' : '#D97A3F',
             }}
             transition={{ duration: 0.12, ease: 'easeOut' }}
             disabled={!inputText.trim() && !isStreaming}
-            className={`flex h-8 w-8 items-center justify-center rounded-[2px] bg-accent-primary text-background font-bold transition-opacity cursor-pointer ${
+            className={`relative flex h-8 w-8 items-center justify-center rounded-[2px] bg-accent-primary text-background font-bold transition-opacity cursor-pointer ${
               !inputText.trim() && !isStreaming ? 'opacity-40 cursor-not-allowed' : 'hover:brightness-110'
             }`}
             title={isStreaming ? 'Stop generation' : 'Send message (Enter)'}
           >
-            {isStreaming ? (
-              // Stop Square morph
-              <span className="h-3 w-3 bg-background rounded-[1px]" />
-            ) : (
-              // Up Arrow
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
-            )}
+            <div className="relative flex items-center justify-center w-4 h-4">
+              {/* Morphing Stem / Stop Square */}
+              <motion.span
+                initial={false}
+                animate={
+                  isStreaming
+                    ? {
+                        width: 10,
+                        height: 10,
+                        borderRadius: 1.5,
+                        y: 0,
+                      }
+                    : {
+                        width: 2.5,
+                        height: 12,
+                        borderRadius: 1,
+                        y: 1,
+                      }
+                }
+                transition={{ duration: 0.18, ease: 'easeOut' }}
+                className="absolute bg-background pointer-events-none"
+              />
+              {/* Morphing Arrowhead / Chevron */}
+              <motion.span
+                initial={false}
+                animate={
+                  isStreaming
+                    ? {
+                        width: 0,
+                        height: 0,
+                        scale: 0,
+                        opacity: 0,
+                        y: 0,
+                      }
+                    : {
+                        width: 7,
+                        height: 7,
+                        scale: 1,
+                        opacity: 1,
+                        y: -2.5,
+                      }
+                }
+                transition={{ duration: 0.15, ease: 'easeOut' }}
+                className="absolute border-t-[2.5px] border-l-[2.5px] border-background rotate-45 pointer-events-none"
+              />
+            </div>
           </motion.button>
         </div>
       </div>

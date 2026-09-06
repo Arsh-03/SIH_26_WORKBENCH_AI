@@ -1,15 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import type { ChatMessage, ArtifactData, SuggestionCardData } from '../lib/types'
-import {
-  mockSuggestionCards,
-  mockInitialMessages,
-  mockArtifactData,
-  mockChatSessions,
-} from '../lib/mockData'
+import type { SuggestionCardData } from '../lib/types'
+import { mockSuggestionCards } from '../lib/mockData'
+import { useWorkbench } from '../lib/WorkbenchContext'
 import { InputBar } from '../components/chat/InputBar'
 import { MessageBlock } from '../components/chat/MessageBlock'
+import { ThinkingIndicator } from '../components/chat/ThinkingIndicator'
 import { ArtifactPanel } from '../components/artifact/ArtifactPanel'
 
 /**
@@ -22,43 +19,30 @@ import { ArtifactPanel } from '../components/artifact/ArtifactPanel'
  */
 export const ChatPage: React.FC = () => {
   const { id: routeChatId } = useParams<{ id?: string }>()
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [activeArtifact, setActiveArtifact] = useState<ArtifactData | null>(null)
-  const [isArtifactOpen, setIsArtifactOpen] = useState(false)
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [isCollapsingCards, setIsCollapsingCards] = useState(false)
+  const {
+    messages,
+    sendMessage,
+    isStreaming,
+    currentThinking,
+    stopStreaming,
+    activeArtifact,
+    isArtifactOpen,
+    openArtifact,
+    closeArtifact,
+    loadChatSession,
+  } = useWorkbench()
 
+  const [isCollapsingCards, setIsCollapsingCards] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Load chat session if route param is present
   useEffect(() => {
     if (routeChatId) {
-      const found = mockChatSessions.find((s) => s.id === routeChatId)
-      if (found) {
-        setMessages(found.messages)
-        const art = found.messages.find((m) => m.artifact)?.artifact
-        if (art) {
-          setActiveArtifact(art)
-        }
-      }
+      loadChatSession(routeChatId)
     }
-  }, [routeChatId])
+  }, [routeChatId, loadChatSession])
 
-  // Listen for global "New Chat" event from Sidebar
-  useEffect(() => {
-    const handleResetToZero = () => {
-      setMessages([])
-      setActiveArtifact(null)
-      setIsArtifactOpen(false)
-      setIsStreaming(false)
-      setIsCollapsingCards(false)
-    }
-
-    window.addEventListener('workbench:new-chat', handleResetToZero)
-    return () => window.removeEventListener('workbench:new-chat', handleResetToZero)
-  }, [])
-
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages or streaming
   useEffect(() => {
     if (messages.length > 0) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -67,70 +51,27 @@ export const ChatPage: React.FC = () => {
 
   // Handle user sending a prompt
   const handleSendMessage = (text: string) => {
-    const newUserMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      sender: 'user',
-      text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    }
-
-    // Transition from Zero State to Active Chat
-    setIsCollapsingCards(true)
-    setTimeout(() => {
-      setMessages((prev) => [...prev, newUserMsg])
-      setIsStreaming(true)
-
-      // Simulate model streaming response with thinking and artifact
+    if (messages.length === 0) {
+      // Trigger Zero State → Active Chat stagger-collapse last-to-first (DESIGN.md Section 6: ~40ms stagger)
+      setIsCollapsingCards(true)
       setTimeout(() => {
-        const newModelMsg: ChatMessage = {
-          id: `model-${Date.now()}`,
-          sender: 'model',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          thinkingDuration: 'Thought for 4 seconds',
-          thinkingSteps: [
-            'Inspected input dependencies and syntax requirements...',
-            'Decoupled synchronous event handling to preserve 60 FPS scroll...',
-            'Emitted verified TypeScript implementation and compiled artifacts.',
-          ],
-          text: `I have analyzed your request: "${text}".\n\nHere is the updated implementation with optimized virtualized data streams, telemetry metrics, and unit test suites.`,
-          artifact: {
-            ...mockArtifactData,
-            title: text.includes('Rate Limiter')
-              ? 'RateLimiter.ts'
-              : text.includes('Postgres')
-                ? '001_brin_migration.sql'
-                : mockArtifactData.title,
-          },
-        }
-
-        setMessages((prev) => [...prev, newModelMsg])
-        setIsStreaming(false)
-      }, 1400)
-    }, 180)
+        setIsCollapsingCards(false)
+        sendMessage(text)
+      }, 280)
+    } else {
+      sendMessage(text)
+    }
   }
 
   // Handle clicking a suggestion card in Zero State
   const handleSelectSuggestion = (card: SuggestionCardData) => {
     setIsCollapsingCards(true)
 
-    // DESIGN.md Section 6: Zero State → Active Chat card stagger-collapse (~40ms stagger)
+    // DESIGN.md Section 6: Zero State → Active Chat card stagger-collapse (~40ms stagger last-to-first)
     setTimeout(() => {
-      if (card.id === 'card-1') {
-        // Load the full sample conversation with EnhancedDashboard.tsx
-        setMessages(mockInitialMessages)
-      } else {
-        handleSendMessage(card.prompt)
-      }
-    }, 200)
-  }
-
-  const handleOpenArtifact = (artifact: ArtifactData) => {
-    setActiveArtifact(artifact)
-    setIsArtifactOpen(true)
-  }
-
-  const handleCloseArtifact = () => {
-    setIsArtifactOpen(false)
+      setIsCollapsingCards(false)
+      sendMessage(card.prompt)
+    }, 280)
   }
 
   const hasMessages = messages.length > 0
@@ -141,6 +82,7 @@ export const ChatPage: React.FC = () => {
         Chat Pane:
         - Full width when in Zero State or Active Chat without artifact
         - 46% width when in Split View (DESIGN.md Section 1 & Section 5)
+        - Gentle spring on width change (DESIGN.md Section 6: overshoot under 2%)
       */}
       <motion.div
         animate={{
@@ -148,8 +90,8 @@ export const ChatPage: React.FC = () => {
         }}
         transition={{
           type: 'spring',
-          stiffness: 300,
-          damping: 32,
+          stiffness: 260,
+          damping: 28,
           mass: 0.9,
           // Spring overshoot under 2% per DESIGN.md Section 6
         }}
@@ -192,9 +134,10 @@ export const ChatPage: React.FC = () => {
                           transition: {
                             duration: 0.15,
                             delay: (mockSuggestionCards.length - 1 - index) * 0.04, // 40ms stagger last-to-first
+                            ease: 'easeOut',
                           },
                         }}
-                        transition={{ duration: 0.2, delay: index * 0.05 }}
+                        transition={{ duration: 0.2, delay: index * 0.05, ease: 'easeOut' }}
                         onClick={() => handleSelectSuggestion(card)}
                         className="group flex flex-col justify-between rounded-[4px] border border-border bg-surface-1 p-4 shadow-sm hover:bg-surface-2/70 hover:border-accent-primary/60 transition-all cursor-pointer min-h-[190px]"
                       >
@@ -230,6 +173,7 @@ export const ChatPage: React.FC = () => {
               <InputBar
                 onSendMessage={handleSendMessage}
                 isStreaming={isStreaming}
+                onStopStreaming={stopStreaming}
               />
             </div>
           </div>
@@ -250,16 +194,33 @@ export const ChatPage: React.FC = () => {
                   <MessageBlock
                     key={msg.id}
                     message={msg}
-                    onOpenArtifact={handleOpenArtifact}
+                    onOpenArtifact={openArtifact}
                     isArtifactOpen={isArtifactOpen}
                   />
                 ))}
 
-                {/* Streaming pulse indicator */}
+                {/* Simulated live ThinkingIndicator during model generation */}
                 {isStreaming && (
-                  <div className="flex items-center gap-2 font-mono text-xs italic text-accent-primary py-2">
-                    <span className="h-2 w-2 rounded-full bg-accent-primary animate-pulse" />
-                    <span>Halide-V4 synthesizing code artifacts…</span>
+                  <div className="flex flex-col items-start w-full max-w-3xl my-5 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-[10px] uppercase tracking-widest text-accent-primary font-semibold">
+                        AI ASSISTANT
+                      </span>
+                      <span className="font-mono text-[10px] text-text-muted/60">
+                        Synthesizing response…
+                      </span>
+                    </div>
+                    <ThinkingIndicator
+                      duration={currentThinking?.duration || 'Synthesizing reasoning sequence…'}
+                      steps={
+                        currentThinking?.steps || [
+                          'Parsing AST dependencies and token scope...',
+                          'Analyzing data flow bottlenecks in render pipeline...',
+                          'Emitting verified TypeScript implementation and artifacts...',
+                        ]
+                      }
+                      defaultExpanded={true}
+                    />
                   </div>
                 )}
 
@@ -272,7 +233,7 @@ export const ChatPage: React.FC = () => {
               <InputBar
                 onSendMessage={handleSendMessage}
                 isStreaming={isStreaming}
-                onStopStreaming={() => setIsStreaming(false)}
+                onStopStreaming={stopStreaming}
               />
             </div>
           </div>
@@ -291,15 +252,15 @@ export const ChatPage: React.FC = () => {
             exit={{ width: '0%', opacity: 0 }}
             transition={{
               type: 'spring',
-              stiffness: 300,
-              damping: 32,
+              stiffness: 260,
+              damping: 28,
               mass: 0.9,
             }}
             className="relative h-full flex flex-col overflow-hidden"
           >
             <ArtifactPanel
               artifact={activeArtifact}
-              onClose={handleCloseArtifact}
+              onClose={closeArtifact}
             />
           </motion.div>
         )}

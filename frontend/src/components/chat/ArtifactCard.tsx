@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { motion } from 'framer-motion'
 import type { ArtifactData } from '../../lib/types'
+import { AmberUnderline } from '../layout/AmberUnderline'
 
 export interface ArtifactCardProps {
   artifact: ArtifactData
@@ -67,16 +68,20 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({
             </button>
           )}
 
-          {/* Action: Amber text link "Open →" */}
+          {/* Action: Amber text link "Open →" with left-to-right underline draw */}
           <button
             type="button"
             onClick={handleOpenClick}
-            className={`font-mono text-xs font-semibold text-accent-primary transition-all flex items-center gap-1 cursor-pointer hover:underline ${
+            className={`font-mono text-xs font-semibold text-accent-primary transition-all flex items-center gap-1 cursor-pointer ${
               isOpen ? 'opacity-50 pointer-events-none' : ''
             }`}
           >
-            <span>{isOpen ? 'Viewing' : 'Open'}</span>
-            <span>→</span>
+            <AmberUnderline>
+              <span className="flex items-center gap-1">
+                <span>{isOpen ? 'Viewing' : 'Open'}</span>
+                <span>→</span>
+              </span>
+            </AmberUnderline>
           </button>
         </div>
       </div>

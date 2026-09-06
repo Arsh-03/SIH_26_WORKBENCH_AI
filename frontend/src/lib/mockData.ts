@@ -106,6 +106,12 @@ export const mockCommandPaletteItems: CommandPaletteItem[] = [
   },
   // COMMANDS
   {
+    id: 'cmd-act-new',
+    title: 'New Chat Session',
+    category: 'COMMANDS',
+    shortcut: '⌘N',
+  },
+  {
     id: 'cmd-act-1',
     title: 'Export Schema Definitions (.ts)',
     category: 'COMMANDS',

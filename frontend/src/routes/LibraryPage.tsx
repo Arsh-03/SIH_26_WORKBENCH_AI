@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { mockLibraryItems } from '../lib/mockData'
-import type { LibraryItem } from '../lib/types'
 
 export const LibraryPage: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('All')
@@ -22,7 +21,7 @@ export const LibraryPage: React.FC = () => {
     return matchesCategory && matchesQuery
   })
 
-  const handleOpenArtifact = (_item: LibraryItem) => {
+  const handleOpenArtifact = () => {
     navigate('/chat/auth-middleware')
   }
 
@@ -86,7 +85,7 @@ export const LibraryPage: React.FC = () => {
         {filteredItems.map((item) => (
           <div
             key={item.id}
-            onClick={() => handleOpenArtifact(item)}
+            onClick={handleOpenArtifact}
             className="group flex flex-col justify-between rounded-[4px] border border-border bg-surface-1 overflow-hidden shadow-sm hover:border-accent-primary/60 hover:bg-surface-2/60 transition-all cursor-pointer"
           >
             {/* Contact-Sheet Header Bar */}

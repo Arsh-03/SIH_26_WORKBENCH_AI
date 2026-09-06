@@ -35,17 +35,18 @@ export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({
         onClick={() => setIsExpanded((prev) => !prev)}
         className="group inline-flex items-center gap-2 font-mono text-xs italic text-text-muted hover:text-text-primary transition-colors cursor-pointer py-1"
       >
-        {/* Pulsing Darkroom Amber Dot (DESIGN.md Section 6: uneven rhythm) */}
+        {/* Pulsing Darkroom Amber Dot (DESIGN.md Section 6: uneven rhythm with ±15% interval variance) */}
         <motion.span
           animate={{
-            scale: [1, 1.25, 0.9, 1.15, 1],
-            opacity: [0.8, 1, 0.7, 1, 0.8],
+            scale: [1, 1.3, 0.85, 1.2, 1],
+            opacity: [0.65, 1, 0.55, 0.95, 0.65],
           }}
           transition={{
             duration: 2.4,
             repeat: Infinity,
             ease: 'easeInOut',
-            times: [0, 0.25, 0.55, 0.8, 1],
+            // Base interval = 0.25. Times with ±15% variance: [0, 0.29 (+16%), 0.50 (-16%), 0.78 (+12%), 1.0 (-12%)]
+            times: [0, 0.29, 0.5, 0.78, 1],
           }}
           className="h-1.5 w-1.5 rounded-full bg-accent-primary shrink-0"
         />

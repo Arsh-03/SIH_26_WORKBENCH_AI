@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { CommandPaletteItem, CommandCategory } from '../../lib/types'
 import { mockCommandPaletteItems } from '../../lib/mockData'
+import { useWorkbench } from '../../lib/WorkbenchContext'
 
 export interface CommandPaletteProps {
   isOpen: boolean
@@ -27,19 +29,27 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   items = mockCommandPaletteItems,
   onSelectItem,
 }) => {
+  const navigate = useNavigate()
+  const {
+    toggleArtifactPanel,
+    resetToNewChat,
+    sendMessage,
+    activeArtifact,
+  } = useWorkbench()
+
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  // Filter items based on query
+  // Filter items based on substring query
   const filteredItems = items.filter((item) => {
     if (!query.trim()) return true
-    const q = query.toLowerCase()
+    const q = query.trim().toLowerCase()
     return (
       item.title.toLowerCase().includes(q) ||
-      item.subtitle?.toLowerCase().includes(q) ||
-      item.category.toLowerCase().includes(q)
+      (item.subtitle && item.subtitle.toLowerCase().includes(q)) ||
+      (item.badge && item.badge.toLowerCase().includes(q))
     )
   })
 
@@ -52,22 +62,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   // Flat list for index-based keyboard navigation
   const flatItems = groupedItems.flatMap((g) => g.items)
 
+  const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setQuery(e.target.value)
+    setSelectedIndex(0)
+  }
+
   // Auto-focus input when opened
   useEffect(() => {
     if (isOpen) {
-      setQuery('')
-      setSelectedIndex(0)
       const timer = setTimeout(() => {
         inputRef.current?.focus()
       }, 50)
       return () => clearTimeout(timer)
     }
   }, [isOpen])
-
-  // Reset selectedIndex when filter changes
-  useEffect(() => {
-    setSelectedIndex(0)
-  }, [query])
 
   // Scroll selected item into view
   useEffect(() => {
@@ -78,6 +86,56 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       }
     }
   }, [selectedIndex, flatItems.length])
+
+  const handleSelect = (item: CommandPaletteItem) => {
+    if (onSelectItem) {
+      onSelectItem(item)
+      onClose()
+      return
+    }
+
+    if (item.onSelect) {
+      item.onSelect()
+      onClose()
+      return
+    }
+
+    if (item.path) {
+      navigate(item.path)
+      onClose()
+      return
+    }
+
+    if (item.id === 'cmd-act-2' || item.title.includes('Toggle Split Workspace')) {
+      toggleArtifactPanel()
+      onClose()
+      return
+    }
+
+    if (item.id === 'cmd-act-new' || item.title.includes('New Chat')) {
+      resetToNewChat()
+      navigate('/')
+      onClose()
+      return
+    }
+
+    if (item.id === 'cmd-act-1') {
+      if (activeArtifact?.files[0]?.content) {
+        navigator.clipboard.writeText(activeArtifact.files[0].content)
+      }
+      onClose()
+      return
+    }
+
+    if (item.id === 'cmd-act-3') {
+      navigate('/')
+      sendMessage('Generate a Postgres migration script adding BRIN indexing on block range pages for high-throughput time-series event tables.')
+      onClose()
+      return
+    }
+
+    onClose()
+  }
 
   // Keyboard navigation inside modal
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -101,15 +159,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         handleSelect(selected)
       }
     }
-  }
-
-  const handleSelect = (item: CommandPaletteItem) => {
-    if (onSelectItem) {
-      onSelectItem(item)
-    } else if (item.onSelect) {
-      item.onSelect()
-    }
-    onClose()
   }
 
   return (
@@ -148,7 +197,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 ref={inputRef}
                 type="text"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={handleQueryChange}
                 placeholder="Jump to a chat, project, or command…"
                 className="w-full bg-transparent border-none outline-none font-display text-[17px] text-text-primary placeholder:text-text-placeholder placeholder:italic focus:ring-0 leading-normal"
               />

@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ArtifactData, ArtifactVersion } from '../../lib/types'
+import { AmberUnderline } from '../layout/AmberUnderline'
 
 export interface ArtifactPanelProps {
   artifact: ArtifactData
@@ -13,11 +14,14 @@ type ArtifactTab = 'preview' | 'code' | 'terminal'
 /**
  * ArtifactPanel Component
  * Follows DESIGN.md Section 4E & Section 6:
- * - Signature Artifact Materialization sequence (~550ms): border draw, surface fade, content fade-up with brief grain flicker
- * - Top bar: Fraunces title + amber badge, Preview/Code/Terminal switcher with sliding underline, Explain link, action tray, typographic ×
- * - Multi-file tabs: flat monospace tabs with sliding amber underline
+ * - Signature Artifact Materialization sequence (~550ms):
+ *   (1) panel border draws in left-to-right then top-to-bottom (~150ms)
+ *   (2) panel surface fades in behind completed border (~150ms, overlapping tail of 1)
+ *   (3) content fades up 8px with brief grain-opacity flicker (3.5%→~8% for two frames, settles back)
+ * - Top bar: Fraunces title + amber badge, Preview/Code/Terminal switcher with sliding underline (~180ms ease-out)
+ * - Multi-file tabs: flat monospace tabs with sliding amber underline (~180ms ease-out)
  * - Live interactive preview of the rendered component
- * - Version rail: V.1, V.2, V.3 with diff inspection when selecting earlier versions
+ * - Version rail: V.1, V.2, V.3 with sliding underline (~180ms ease-out)
  */
 export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
   artifact,
@@ -51,102 +55,152 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 20 }}
-      transition={{ duration: 0.25, ease: 'easeOut' }}
-      className={`relative flex h-full flex-col border-l border-border bg-surface-1 select-none overflow-hidden ${className}`}
+    <div
+      className={`relative flex h-full flex-col select-none overflow-hidden ${className}`}
     >
-      {/* Signature Materialization Animated Hairline Left Border */}
+      {/* =========================================================================
+          SIGNATURE MOMENT — ARTIFACT MATERIALIZATION (~550ms total sequence)
+          DESIGN.md Section 6
+          ========================================================================= */}
+
+      {/* Stage 1: Panel border draws in (~150ms total) */}
+      {/* Stage 1a: Top border draws left-to-right (~75ms) */}
+      <motion.div
+        initial={{ scaleX: 0 }}
+        animate={{ scaleX: 1 }}
+        transition={{ duration: 0.075, ease: 'easeOut' }}
+        style={{ originX: 0 }}
+        className="absolute top-0 left-0 right-0 h-[1px] bg-border pointer-events-none z-30"
+      />
+      {/* Stage 1b: Left border draws top-to-bottom (~75ms, starts at 75ms) */}
       <motion.div
         initial={{ scaleY: 0 }}
         animate={{ scaleY: 1 }}
-        transition={{ duration: 0.18, ease: 'easeOut' }}
+        transition={{ duration: 0.075, delay: 0.075, ease: 'easeOut' }}
         style={{ originY: 0 }}
-        className="absolute top-0 left-0 bottom-0 w-[1px] bg-accent-primary/60 pointer-events-none z-20"
+        className="absolute top-0 left-0 bottom-0 w-[1px] bg-accent-primary/80 pointer-events-none z-30"
       />
 
-      {/* Top Bar: Title, Badge, Tab Switcher, Action Tray, Close Button */}
-      <div className="flex h-14 items-center justify-between border-b border-border bg-surface-1 px-5">
-        {/* Left: Fraunces Title + Badge */}
-        <div className="flex items-center gap-3 min-w-0">
-          <h2 className="font-display text-base font-semibold text-text-primary truncate">
-            {artifact.title}
-          </h2>
-          <span className="font-mono text-[9px] uppercase tracking-wider text-accent-primary border border-accent-primary/40 px-1.5 py-0.5 rounded-[2px] bg-surface-2 shrink-0">
-            {artifact.badge}
-          </span>
-        </div>
+      {/* Stage 2: Panel surface fades in behind completed border (~150ms, overlapping tail of 1) */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.15, delay: 0.11, ease: 'easeOut' }}
+        className="absolute inset-0 bg-surface-1 border-l border-border pointer-events-none z-0"
+      />
 
-        {/* Center: Underline-style Tab Switcher */}
-        <nav aria-label="Artifact View" className="flex items-center gap-6">
-          {(['preview', 'code', 'terminal'] as const).map((tab) => {
-            const isActive = activeTab === tab
-            return (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => {
-                  setActiveTab(tab)
-                  setDiffViewVersion(null)
-                }}
-                className={`relative py-4 text-xs font-medium capitalize transition-colors cursor-pointer ${
-                  isActive ? 'text-text-primary font-semibold' : 'text-text-muted hover:text-text-body'
-                }`}
-              >
-                <span>{tab}</span>
-                {isActive && (
-                  <motion.span
-                    layoutId="artifact-active-tab-underline"
-                    transition={{ duration: 0.18, ease: 'easeOut' }}
-                    className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent-primary"
-                  />
-                )}
-              </button>
-            )
-          })}
-        </nav>
+      {/* Stage 3: Content fades up 8px with brief grain-opacity flicker (3.5%→~8%→settle) */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.28, delay: 0.26, ease: 'easeOut' }}
+        className="relative z-10 flex h-full flex-col overflow-hidden"
+      >
+        {/* Grain flicker overlay during materialization (~550ms total sequence) */}
+        <motion.div
+          aria-hidden="true"
+          initial={{ opacity: 0.035 }}
+          animate={{ opacity: [0.035, 0.08, 0.08, 0.035] }}
+          transition={{
+            duration: 0.12,
+            delay: 0.35,
+            times: [0, 0.3, 0.7, 1],
+            ease: 'easeOut',
+          }}
+          className="pointer-events-none absolute inset-0 z-40"
+          style={{ mixBlendMode: 'screen' }}
+        >
+          <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
+            <filter id="materialize-grain">
+              <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="4" stitchTiles="stitch" />
+              <feColorMatrix type="saturate" values="0" />
+            </filter>
+            <rect width="100%" height="100%" filter="url(#materialize-grain)" />
+          </svg>
+        </motion.div>
 
-        {/* Right: Actions (Explain, Copy, Download, Close) */}
-        <div className="flex items-center gap-4 text-xs font-mono">
-          <button
-            type="button"
-            className="italic text-text-muted hover:text-accent-primary transition-colors cursor-pointer hidden md:inline"
-          >
-            Explain
-          </button>
-
-          <div className="flex items-center gap-3 text-text-muted">
-            <button
-              type="button"
-              onClick={handleCopyCode}
-              className="hover:text-text-primary transition-colors cursor-pointer"
-            >
-              {copied ? 'Copied!' : 'Copy'}
-            </button>
-            <span>·</span>
-            <button
-              type="button"
-              className="hover:text-text-primary transition-colors cursor-pointer"
-            >
-              Export
-            </button>
+        {/* Top Bar: Title, Badge, Tab Switcher, Action Tray, Close Button */}
+        <div className="flex h-14 items-center justify-between border-b border-border bg-surface-1 px-5">
+          {/* Left: Fraunces Title + Badge */}
+          <div className="flex items-center gap-3 min-w-0">
+            <h2 className="font-display text-base font-semibold text-text-primary truncate">
+              {artifact.title}
+            </h2>
+            <span className="font-mono text-[9px] uppercase tracking-wider text-accent-primary border border-accent-primary/40 px-1.5 py-0.5 rounded-[2px] bg-surface-2 shrink-0">
+              {artifact.badge}
+            </span>
           </div>
 
-          <div className="h-4 w-[1px] bg-border" />
+          {/* Center: Underline-style Tab Switcher */}
+          <nav aria-label="Artifact View" className="flex items-center gap-6">
+            {(['preview', 'code', 'terminal'] as const).map((tab) => {
+              const isActive = activeTab === tab
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => {
+                    setActiveTab(tab)
+                    setDiffViewVersion(null)
+                  }}
+                  className={`relative py-4 text-xs font-medium capitalize transition-colors cursor-pointer ${
+                    isActive ? 'text-text-primary font-semibold' : 'text-text-muted hover:text-text-body'
+                  }`}
+                >
+                  <span>{tab}</span>
+                  {isActive && (
+                    <motion.span
+                      layoutId="artifact-active-tab-underline"
+                      transition={{ duration: 0.18, ease: 'easeOut' }}
+                      className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent-primary"
+                    />
+                  )}
+                </button>
+              )
+            })}
+          </nav>
 
-          {/* Typographic × Close button */}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close artifact panel"
-            className="font-display text-lg text-text-muted hover:text-accent-primary transition-colors leading-none cursor-pointer"
-          >
-            ×
-          </button>
+          {/* Right: Actions (Explain, Copy, Download, Close) */}
+          <div className="flex items-center gap-4 text-xs font-mono">
+            <button
+              type="button"
+              className="italic text-text-muted transition-colors cursor-pointer hidden md:inline"
+            >
+              <AmberUnderline>
+                <span>Explain</span>
+              </AmberUnderline>
+            </button>
+
+            <div className="flex items-center gap-3 text-text-muted">
+              <button
+                type="button"
+                onClick={handleCopyCode}
+                className="hover:text-text-primary transition-colors cursor-pointer"
+              >
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+              <span>·</span>
+              <button
+                type="button"
+                className="hover:text-text-primary transition-colors cursor-pointer"
+              >
+                Export
+              </button>
+            </div>
+
+            <div className="h-4 w-[1px] bg-border" />
+
+            {/* Typographic × Close button */}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close artifact panel"
+              className="font-display text-lg text-text-muted hover:text-accent-primary transition-colors leading-none cursor-pointer"
+            >
+              ×
+            </button>
+          </div>
         </div>
-      </div>
 
       {/* Multi-file Tabs Bar */}
       {artifact.files && artifact.files.length > 1 && (
@@ -166,7 +220,7 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
                 {isSelected && (
                   <motion.span
                     layoutId="active-file-tab-underline"
-                    transition={{ duration: 0.15, ease: 'easeOut' }}
+                    transition={{ duration: 0.18, ease: 'easeOut' }}
                     className="absolute bottom-0 left-0 right-0 h-[1px] bg-accent-primary"
                   />
                 )}
@@ -384,6 +438,7 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
         </span>
       </div>
     </motion.div>
+  </div>
   )
 }
 

@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
 import { FilmGrain } from './FilmGrain'
 import { Sidebar } from './Sidebar'
 import { CommandPalette } from './CommandPalette'
+import { useWorkbench } from '../../lib/WorkbenchContext'
 
 /**
  * AppLayout
@@ -10,24 +11,11 @@ import { CommandPalette } from './CommandPalette'
  * the Sidebar navigation, global Command Palette (⌘K), and outlet for active routes.
  */
 export const AppLayout: React.FC = () => {
-  const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false)
+  const { isCmdPaletteOpen, setIsCmdPaletteOpen, resetToNewChat } = useWorkbench()
   const navigate = useNavigate()
 
-  // Global ⌘K / Ctrl+K keyboard shortcut
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        setIsCmdPaletteOpen((prev) => !prev)
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
-
   const handleNewChat = () => {
-    window.dispatchEvent(new CustomEvent('workbench:new-chat'))
+    resetToNewChat()
     navigate('/')
   }
 

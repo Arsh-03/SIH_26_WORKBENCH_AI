@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { mockDetailedProjects } from '../lib/mockData'
-import type { ProjectItem } from '../lib/types'
 
 export const ProjectsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
@@ -17,7 +16,7 @@ export const ProjectsPage: React.FC = () => {
     )
   })
 
-  const handleOpenProject = (_project: ProjectItem) => {
+  const handleOpenProject = () => {
     // Navigate to chat or project session
     navigate('/chat/auth-middleware')
   }
@@ -64,7 +63,7 @@ export const ProjectsPage: React.FC = () => {
         {filteredProjects.map((project) => (
           <div
             key={project.id}
-            onClick={() => handleOpenProject(project)}
+            onClick={handleOpenProject}
             className="group flex flex-col justify-between rounded-[4px] border border-border bg-surface-1 p-5 shadow-sm hover:border-accent-primary/60 hover:bg-surface-2/60 transition-all cursor-pointer space-y-4"
           >
             <div>
