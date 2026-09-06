@@ -15,7 +15,7 @@ export const SettingsPage: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 px-8 py-8 overflow-y-auto max-w-4xl mx-auto w-full space-y-8 select-none">
+    <div className="flex-1 w-full h-full overflow-y-auto px-6 md:px-10 lg:px-12 py-8 space-y-8 select-none">
       {/* Editorial Header */}
       <div className="border-b border-border/80 pb-5 space-y-1.5">
         <div className="flex items-center justify-between">

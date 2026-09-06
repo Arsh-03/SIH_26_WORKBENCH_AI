@@ -35,7 +35,7 @@ export const ChatsPage: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 px-8 py-8 overflow-y-auto max-w-5xl mx-auto w-full space-y-6 select-none">
+    <div className="flex-1 w-full h-full overflow-y-auto px-6 md:px-10 lg:px-12 py-8 space-y-6 select-none">
       {/* Editorial Header */}
       <div className="border-b border-border/80 pb-5 space-y-1.5">
         <div className="flex items-center justify-between">
@@ -54,7 +54,7 @@ export const ChatsPage: React.FC = () => {
       {/* Filter / Search Bar (small-caps, hairline borders, no filled box) */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 border-b border-border/60 pb-3">
         {/* Search Input */}
-        <div className="flex items-center gap-2 flex-1 max-w-md">
+        <div className="flex items-center gap-2 flex-1 max-w-lg">
           <span className="font-mono text-[11px] uppercase tracking-widest text-text-muted">
             SEARCH:
           </span>
@@ -100,9 +100,9 @@ export const ChatsPage: React.FC = () => {
             <div
               key={chat.id}
               onClick={() => handleSelectChat(chat)}
-              className="group flex items-start justify-between py-3.5 px-4 cursor-pointer transition-colors border-l-[3px] border-transparent hover:border-accent-primary hover:bg-surface-1/60 rounded-[2px]"
+              className="group flex items-center justify-between py-4 px-4 cursor-pointer transition-colors border-l-[3px] border-transparent hover:border-accent-primary hover:bg-surface-1/60 rounded-[2px]"
             >
-              <div className="space-y-1 min-w-0 pr-4 flex-1">
+              <div className="space-y-1 min-w-0 pr-6 flex-1">
                 <div className="flex items-center gap-2.5">
                   <h2 className="font-display text-base font-medium text-text-primary group-hover:text-accent-primary transition-colors truncate">
                     {chat.title}
@@ -139,7 +139,7 @@ export const ChatsPage: React.FC = () => {
                   {chat.messageCount} msgs
                 </span>
                 <span className="text-text-body/80">{chat.timestamp}</span>
-                <span className="text-accent-primary font-bold text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="text-accent-primary font-bold text-xs opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all">
                   →
                 </span>
               </div>

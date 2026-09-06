@@ -26,7 +26,7 @@ export const LibraryPage: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 px-8 py-8 overflow-y-auto max-w-5xl mx-auto w-full space-y-6 select-none">
+    <div className="flex-1 w-full h-full overflow-y-auto px-6 md:px-10 lg:px-12 py-8 space-y-6 select-none">
       {/* Editorial Header */}
       <div className="border-b border-border/80 pb-5 space-y-1.5">
         <div className="flex items-center justify-between">
@@ -75,13 +75,13 @@ export const LibraryPage: React.FC = () => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Filter artifacts…"
-            className="w-48 bg-transparent border-b border-border/80 px-2 py-1 font-body text-xs text-text-primary placeholder:italic placeholder:text-text-placeholder focus:border-accent-primary focus:outline-none transition-colors"
+            className="w-56 max-w-xs bg-transparent border-b border-border/80 px-2 py-1 font-body text-xs text-text-primary placeholder:italic placeholder:text-text-placeholder focus:border-accent-primary focus:outline-none transition-colors"
           />
         </div>
       </div>
 
       {/* Reusable Contact-Sheet Card Grid (DESIGN.md 4D & Library Specs) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {filteredItems.map((item) => (
           <div
             key={item.id}

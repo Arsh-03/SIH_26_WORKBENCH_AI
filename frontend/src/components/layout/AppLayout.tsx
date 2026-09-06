@@ -20,7 +20,7 @@ export const AppLayout: React.FC = () => {
   }
 
   return (
-    <div className="relative flex h-screen w-screen overflow-hidden bg-background text-text-body font-body antialiased selection:bg-accent-primary/20 selection:text-text-primary">
+    <div className="relative flex h-screen w-full overflow-hidden bg-background text-text-body font-body antialiased selection:bg-accent-primary/20 selection:text-text-primary">
       {/* Analog film-grain overlay across entire viewport */}
       <FilmGrain />
 
@@ -37,7 +37,7 @@ export const AppLayout: React.FC = () => {
       />
 
       {/* Main content area */}
-      <main className="relative z-10 flex flex-1 flex-col overflow-y-auto bg-background">
+      <main className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
         <Outlet />
       </main>
     </div>
