@@ -339,6 +339,6 @@ SIH_26_WORKBENCH_AI/
 
 ## 📖 Deep Dive Documentation
 
-- **[System Status & Integration Roadmap](file:///home/maaz/Personal/SIH_26_WORKBENCH_AI/backend/Docs/SYSTEM_STATUS_AND_INTEGRATION_ROADMAP.md)** (`backend/Docs/SYSTEM_STATUS_AND_INTEGRATION_ROADMAP.md`)
+- **[System Status & Integration Roadmap](file:///home/maaz/Personal/SIH_26_WORKBENCH_AI/backend/docs/SYSTEM_STATUS_AND_INTEGRATION_ROADMAP.md)** (`backend/docs/SYSTEM_STATUS_AND_INTEGRATION_ROADMAP.md`)
 - **[Frontend Darkroom Design System](file:///home/maaz/Personal/SIH_26_WORKBENCH_AI/frontend/DESIGN.md)** (`frontend/DESIGN.md`)
-- **[SIH Problem Statement Specification](file:///home/maaz/Personal/SIH_26_WORKBENCH_AI/docs/SIH26117.md)** (`docs/SIH26117.md`)
+- **[SIH Problem Statement Specification](file:///home/maaz/Personal/SIH_26_WORKBENCH_AI/backend/docs/SIH26117.md)** (`backend/docs/SIH26117.md`)
