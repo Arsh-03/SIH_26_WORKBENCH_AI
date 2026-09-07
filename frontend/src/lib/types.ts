@@ -110,6 +110,7 @@ export interface ChatSession {
   isPinned?: boolean
   messageCount: number
   model: string
+  path?: string
   messages: ChatMessage[]
 }
 

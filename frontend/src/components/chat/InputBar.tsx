@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useWorkbench } from '../../lib/WorkbenchContext'
+import { api } from '../../lib/api'
 
 export interface InputBarProps {
   onSendMessage?: (text: string) => void
@@ -33,6 +34,7 @@ export const InputBar: React.FC<InputBarProps> = ({
   const {
     scopeFiles,
     removeScopeFile,
+    setScopeFiles,
     activeTools,
     toggleTool,
     isStreaming: ctxIsStreaming,
@@ -50,8 +52,230 @@ export const InputBar: React.FC<InputBarProps> = ({
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const [isSendFlashing, setIsSendFlashing] = useState(false)
 
+  // Voice Input (Speech-to-Text & Audio Visualizer) State
+  const [isListening, setIsListening] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [speechError, setSpeechError] = useState<string | null>(null)
+  const [audioLevel, setAudioLevel] = useState(0)
+
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const recognitionRef = useRef<any>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
+  const baseTextRef = useRef<string>('')
+  const hasLiveTranscriptRef = useRef<boolean>(false)
+
+  // Clean up audio & recognition on unmount
+  useEffect(() => {
+    return () => {
+      stopVoiceInput()
+    }
+  }, [])
+
+  const stopVoiceInput = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop()
+      } catch (err) {
+        // Ignore stop error
+      }
+      recognitionRef.current = null
+    }
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop()
+      } catch (err) {
+        // Ignore stop error
+      }
+    }
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
+    }
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop())
+      mediaStreamRef.current = null
+    }
+
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(() => {})
+      audioContextRef.current = null
+    }
+
+    setIsListening(false)
+    setAudioLevel(0)
+  }
+
+  const startVoiceInput = async () => {
+    setSpeechError(null)
+    hasLiveTranscriptRef.current = false
+    audioChunksRef.current = []
+
+    try {
+      // 1. Request microphone access for real-time audio analysis & recording
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaStreamRef.current = stream
+
+      // 2. Set up Web Audio API equalizer visualizer
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+      audioContextRef.current = audioCtx
+      const analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 64
+      analyserRef.current = analyser
+
+      const source = audioCtx.createMediaStreamSource(stream)
+      source.connect(analyser)
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      const updateLevel = () => {
+        if (!analyserRef.current) return
+        analyserRef.current.getByteFrequencyData(dataArray)
+        let sum = 0
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i]
+        }
+        const average = sum / dataArray.length
+        setAudioLevel(Math.min(1, average / 60))
+        animationFrameRef.current = requestAnimationFrame(updateLevel)
+      }
+      updateLevel()
+
+      // 3. Set up MediaRecorder for universal browser support (Firefox, Safari, Chrome, Edge)
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/ogg')
+        ? 'audio/ogg'
+        : ''
+
+      const options = mimeType ? { mimeType } : undefined
+      const mediaRecorder = new MediaRecorder(stream, options)
+      mediaRecorderRef.current = mediaRecorder
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data)
+        }
+      }
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/webm' })
+        // If Web Speech API was not available or produced no transcript, transcribe via Whisper backend
+        if (!hasLiveTranscriptRef.current && audioBlob.size > 1000) {
+          setIsTranscribing(true)
+          try {
+            const res = await api.transcribeAudio(audioBlob, `speech_${Date.now()}.webm`)
+            if (res.text && res.text.trim()) {
+              setInputText((prev) => {
+                const base = prev ? (prev.endsWith(' ') ? prev : `${prev} `) : ''
+                return `${base}${res.text.trim()}`
+              })
+            }
+          } catch (err: any) {
+            console.error('Backend transcription failed:', err)
+            setSpeechError(err.message || 'Failed to transcribe audio.')
+          } finally {
+            setIsTranscribing(false)
+          }
+        }
+      }
+
+      mediaRecorder.start(250) // Collect 250ms chunks
+      setIsListening(true)
+
+      // 4. Also try browser SpeechRecognition if available for instantaneous real-time typing
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+
+      if (SpeechRecognition) {
+        try {
+          const recognition = new SpeechRecognition()
+          recognition.continuous = true
+          recognition.interimResults = true
+          recognition.lang = 'en-US'
+
+          baseTextRef.current = inputText ? (inputText.endsWith(' ') ? inputText : `${inputText} `) : ''
+
+          recognition.onresult = (event: any) => {
+            let interimTranscript = ''
+            let finalTranscript = ''
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+              if (event.results[i].isFinal) {
+                finalTranscript += event.results[i][0].transcript
+              } else {
+                interimTranscript += event.results[i][0].transcript
+              }
+            }
+
+            const fullSpoken = (finalTranscript || interimTranscript).trim()
+            if (fullSpoken) {
+              hasLiveTranscriptRef.current = true
+              setInputText(`${baseTextRef.current}${fullSpoken}`)
+            }
+          }
+
+          recognition.onerror = (event: any) => {
+            if (event.error !== 'no-speech') {
+              console.warn('Speech recognition warning:', event.error)
+            }
+          }
+
+          recognitionRef.current = recognition
+          recognition.start()
+        } catch (e) {
+          // Gracefully fall back to backend MediaRecorder transcription
+          console.warn('Native speech recognition skipped, using backend Whisper:', e)
+        }
+      }
+    } catch (err: any) {
+      console.error('Error starting audio recording:', err)
+      setSpeechError(err.message || 'Microphone access denied or unavailable.')
+      stopVoiceInput()
+    }
+  }
+
+  const toggleVoiceInput = () => {
+    if (isListening) {
+      stopVoiceInput()
+    } else {
+      startVoiceInput()
+    }
+  }
+
+  // Handle file & photo selection
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+
+    const newScopeFiles = Array.from(files).map((f) => ({
+      id: `file-${Date.now()}-${f.name}`,
+      name: f.name,
+    }))
+
+    setScopeFiles((prev) => [...prev, ...newScopeFiles])
+    setIsAttachmentOpen(false)
+
+    // Attempt background document upload to backend
+    Array.from(files).forEach((f) => {
+      api.uploadDocument('default_workspace', f).catch((err) => {
+        console.warn('Document upload notice:', err)
+      })
+    })
+
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
 
   // Auto-resize textarea height
   useEffect(() => {
@@ -104,6 +328,10 @@ export const InputBar: React.FC<InputBarProps> = ({
     if (isStreaming) {
       onStopStreaming?.()
       return
+    }
+
+    if (isListening) {
+      stopVoiceInput()
     }
 
     if (!inputText.trim()) return
@@ -237,12 +465,23 @@ export const InputBar: React.FC<InputBarProps> = ({
               ATTACHMENTS & TOOLS
             </div>
 
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileSelect}
+              multiple
+              accept="image/*,.pdf,.doc,.docx,.txt,.csv,.json,.py,.ts,.tsx,.md"
+              className="hidden"
+            />
+
             <button
               type="button"
+              onClick={() => fileInputRef.current?.click()}
               className="w-full text-left px-2.5 py-1.5 text-xs text-text-body hover:text-text-primary rounded-[2px] transition-colors border-l-2 border-transparent hover:border-accent-primary cursor-pointer"
             >
               + Add photos & files
             </button>
+
 
             <div className="pt-1 border-t border-border/40">
               <span className="px-2.5 py-1 block font-mono text-[9px] uppercase tracking-wider text-text-muted">
@@ -350,6 +589,95 @@ export const InputBar: React.FC<InputBarProps> = ({
           </span>
         </div>
 
+        {/* Speech Error Banner */}
+        <AnimatePresence>
+          {speechError && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="flex items-center justify-between bg-red-950/40 border-b border-red-500/30 px-3.5 py-1.5 text-xs text-red-300"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-red-400">⚠️</span>
+                <span>{speechError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSpeechError(null)}
+                className="text-red-400 hover:text-red-200 cursor-pointer font-mono text-[10px] ml-2"
+              >
+                ✕
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Live Audio Listening & Waveform Banner */}
+        <AnimatePresence>
+          {isListening && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="flex items-center justify-between bg-accent-primary/10 border-b border-accent-primary/30 px-3.5 py-2 text-xs"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-primary opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent-primary"></span>
+                </span>
+                <span className="font-mono text-[11px] font-semibold text-accent-primary uppercase tracking-wider">
+                  Listening…
+                </span>
+                <span className="text-text-muted text-[11px] hidden sm:inline truncate">
+                  Speak clearly into your microphone
+                </span>
+
+                {/* Real-time Dynamic Audio Equalizer Bars */}
+                <div className="flex items-end gap-[3px] h-3.5 px-1.5 py-0.5 bg-surface-1/80 rounded-[3px] border border-accent-primary/20">
+                  {[0.4, 0.9, 0.6, 1.0, 0.7, 0.3].map((multiplier, idx) => {
+                    const barHeight = Math.max(3, Math.min(14, audioLevel * 18 * multiplier + (idx % 2 === 0 ? 3 : 2)))
+                    return (
+                      <motion.span
+                        key={idx}
+                        animate={{ height: barHeight }}
+                        transition={{ duration: 0.08 }}
+                        className="w-[2.5px] rounded-full bg-accent-primary"
+                      />
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={stopVoiceInput}
+                  className="rounded-[2px] bg-accent-primary px-2 py-0.5 font-mono text-[10px] font-semibold text-background hover:bg-accent-primary/90 transition-colors cursor-pointer"
+                >
+                  Done ✓
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {isTranscribing && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="flex items-center gap-2 bg-surface-2 border-b border-accent-primary/30 px-3.5 py-1.5 text-xs text-text-primary font-mono"
+            >
+              <svg className="animate-spin h-3.5 w-3.5 text-accent-primary shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span className="text-accent-primary text-[11px]">Transcribing audio with Whisper AI…</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Text Input Area */}
         <div className="px-4 py-3">
           <textarea
@@ -358,7 +686,7 @@ export const InputBar: React.FC<InputBarProps> = ({
             value={inputText}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder={placeholder}
+            placeholder={isListening ? 'Dictating live audio... speak now' : placeholder}
             className="w-full resize-none bg-transparent font-display text-[15px] text-text-primary placeholder:italic placeholder:text-text-placeholder focus:outline-none leading-relaxed"
           />
         </div>
@@ -395,8 +723,13 @@ export const InputBar: React.FC<InputBarProps> = ({
             {/* Mic / Audio Input Icon */}
             <button
               type="button"
-              className="flex h-7 w-7 items-center justify-center rounded-[2px] transition-colors hover:bg-surface-1 hover:text-text-primary cursor-pointer"
-              title="Voice Input"
+              onClick={toggleVoiceInput}
+              className={`relative flex items-center justify-center rounded-[2px] transition-all cursor-pointer ${
+                isListening
+                  ? 'h-7 px-2 gap-1.5 bg-accent-primary/20 text-accent-primary border border-accent-primary shadow-xs font-semibold'
+                  : 'h-7 w-7 hover:bg-surface-1 hover:text-text-primary'
+              }`}
+              title={isListening ? 'Stop Voice Recording (Dictating...)' : 'Voice Input (Dictate prompt)'}
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -408,11 +741,17 @@ export const InputBar: React.FC<InputBarProps> = ({
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
+                className={isListening ? 'text-accent-primary animate-pulse' : ''}
               >
                 <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
                 <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                 <line x1="12" x2="12" y1="19" y2="22" />
               </svg>
+              {isListening && (
+                <span className="font-mono text-[10px] uppercase tracking-wider text-accent-primary">
+                  REC
+                </span>
+              )}
             </button>
           </div>
 

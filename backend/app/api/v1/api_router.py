@@ -8,6 +8,7 @@ from backend.app.api.v1.endpoints import (
     telemetry,
     audit,
     artifacts,
+    audio,
 )
 
 api_router = APIRouter()
@@ -31,3 +32,6 @@ api_router.include_router(audit.router, prefix="/audit", tags=["Audit & Complian
 
 # Artifacts Download
 api_router.include_router(artifacts.router, prefix="/artifacts", tags=["Artifacts"])
+
+# Audio Transcription
+api_router.include_router(audio.router, prefix="/audio", tags=["Audio Transcription"])

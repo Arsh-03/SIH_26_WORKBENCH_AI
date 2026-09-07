@@ -93,6 +93,7 @@ class VisionAnalysisResponse(BaseModel):
 class SandboxExecuteRequest(BaseModel):
     code: str
     language: str = "python"
+    stdin: Optional[str] = None
     timeout_seconds: int = 10
     memory_limit_mb: int = 512
 

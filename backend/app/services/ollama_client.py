@@ -14,15 +14,21 @@ class OllamaClient:
         self.vision_model = settings.VISION_MODEL
         self.embedding_model = settings.EMBEDDING_MODEL
 
+    DEFAULT_HEADERS = {
+        "ngrok-skip-browser-warning": "true",
+        "User-Agent": "Sovereign-Workbench-Client/1.0"
+    }
+
     async def check_health(self) -> Dict[str, Any]:
         """Check if local Ollama server is running and get loaded/available models."""
         try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
+            async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=5.0) as client:
                 res = await client.get(f"{self.base_url}/api/tags")
                 if res.status_code == 200:
                     data = res.json()
                     models = [m.get("name", "") for m in data.get("models", [])]
                     return {"running": True, "available_models": models}
+
         except Exception as e:
             logger.debug(f"Ollama server not reachable: {e}")
         return {"running": False, "available_models": []}
@@ -43,7 +49,7 @@ class OllamaClient:
     async def get_embedding(self, text: str) -> List[float]:
         """Fetch dense embeddings from local nomic-embed-text or fallback."""
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=10.0) as client:
                 payload = {
                     "model": self.embedding_model,
                     "prompt": text
@@ -66,7 +72,7 @@ class OllamaClient:
         """Call local Ollama chat API."""
         target_model = model or self.reasoning_model
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=60.0) as client:
                 payload = {
                     "model": target_model,
                     "messages": messages,
@@ -92,7 +98,7 @@ class OllamaClient:
         """Analyze image with local Qwen2-VL model."""
         target_model = model or self.vision_model
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=60.0) as client:
                 payload = {
                     "model": target_model,
                     "prompt": prompt,
@@ -106,6 +112,7 @@ class OllamaClient:
         except Exception as e:
             logger.error(f"Ollama vision analysis error: {e}")
         return ""
+
 
 
 ollama_client = OllamaClient()

@@ -11,10 +11,9 @@ import {
   mockNavItems,
   mockPinnedProjects,
   mockPinnedChats,
-  mockRecentChats,
   mockUserProfile,
 } from '../../lib/mockData'
-
+import { useWorkbench } from '../../lib/WorkbenchContext'
 import { AmberUnderline } from './AmberUnderline'
 
 export interface SidebarProps {
@@ -42,7 +41,7 @@ const AmberUnderlineWrapper = AmberUnderline
 export const Sidebar: React.FC<SidebarProps> = ({
   pinnedProjects = mockPinnedProjects,
   pinnedChats = mockPinnedChats,
-  recentChats = mockRecentChats,
+  recentChats,
   activeNav,
   userProfile = mockUserProfile,
   onOpenCmdPalette,
@@ -50,6 +49,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   className = '',
 }) => {
   const location = useLocation()
+  const { chatSessions, loadChatSession, isSidebarOpen, toggleSidebar } = useWorkbench()
+
+  // Dynamic recent chats from real persistent sessions
+  const dynamicRecentChats = recentChats || chatSessions.slice(0, 7).map((s) => ({
+    id: s.id,
+    title: s.title,
+    path: `/chat/${s.id}`,
+  }))
 
   // Determine active section if not provided as prop
   const currentPath = location?.pathname ?? '/chat'
@@ -65,15 +72,157 @@ export const Sidebar: React.FC<SidebarProps> = ({
             ? 'settings'
             : '')
 
+  if (!isSidebarOpen) {
+    /* =========================================================================
+       COMPACT 56px ICON-RAIL MODE (VS Code / JetBrains / Cursor style)
+       Reclaims 224px for wide-canvas code editing & live split view
+       ========================================================================= */
+    return (
+      <aside
+        className={`relative flex h-screen w-14 shrink-0 select-none flex-col justify-between border-r border-border bg-surface-1 py-3 text-text-body font-body z-20 ${className}`}
+      >
+        {/* Top: Logo Mark + Expand Trigger */}
+        <div className="flex flex-col items-center gap-4">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            title="Expand Sidebar (⌘B)"
+            aria-label="Expand Sidebar"
+            className="group flex flex-col items-center justify-center p-1.5 rounded-[4px] hover:bg-surface-2 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center">
+              <span className="font-display text-sm font-bold text-text-primary group-hover:text-accent-primary transition-colors">
+                AI
+              </span>
+              <span className="h-1.5 w-1.5 rounded-full bg-accent-primary ml-0.5" />
+            </div>
+            <span className="font-mono text-[8px] text-text-muted mt-0.5 group-hover:text-text-primary">
+              »
+            </span>
+          </button>
+
+          {/* New Chat Icon Button */}
+          <button
+            type="button"
+            onClick={onNewChat}
+            title="New Chat (⌘N)"
+            aria-label="New Chat"
+            className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-accent-primary/40 bg-accent-primary/10 text-accent-primary hover:bg-accent-primary/20 hover:border-accent-primary transition-all cursor-pointer shadow-xs"
+          >
+            <span className="font-mono text-base font-bold leading-none">+</span>
+          </button>
+
+          {/* Search Trigger Icon */}
+          <button
+            type="button"
+            onClick={onOpenCmdPalette}
+            title="Search Chats (⌘K)"
+            aria-label="Search Chats"
+            className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-border/80 bg-surface-2/60 text-text-muted hover:text-text-primary hover:border-text-muted/60 transition-all cursor-pointer"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </button>
+
+          <div className="h-[1px] w-6 bg-border/80 my-1" />
+
+          {/* Nav Icons */}
+          <div className="flex flex-col items-center gap-2">
+            {/* Chats Icon */}
+            <Link
+              to="/chats"
+              title={`Chats (${chatSessions.length})`}
+              className={`flex h-8 w-8 items-center justify-center rounded-[4px] transition-all cursor-pointer ${
+                resolvedActiveNav === 'chats'
+                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40'
+                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/60'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </Link>
+
+            {/* Projects Icon */}
+            <Link
+              to="/projects"
+              title="Projects (05)"
+              className={`flex h-8 w-8 items-center justify-center rounded-[4px] transition-all cursor-pointer ${
+                resolvedActiveNav === 'projects'
+                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40'
+                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/60'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+            </Link>
+
+            {/* Library Icon */}
+            <Link
+              to="/library"
+              title="Library (18)"
+              className={`flex h-8 w-8 items-center justify-center rounded-[4px] transition-all cursor-pointer ${
+                resolvedActiveNav === 'library'
+                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40'
+                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/60'
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              </svg>
+            </Link>
+          </div>
+        </div>
+
+        {/* Bottom: Air-Gap Status + Settings + User Avatar */}
+        <div className="flex flex-col items-center gap-3">
+          {/* Air-Gap Status Green Dot */}
+          <div
+            title="Sovereign Subprocess Sandbox Enclave Active (Zero Egress)"
+            className="flex items-center justify-center p-1 cursor-pointer"
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+            </span>
+          </div>
+
+          {/* Settings */}
+          <Link
+            to="/settings"
+            title="Settings"
+            className="flex h-7 w-7 items-center justify-center rounded text-text-muted hover:text-accent-primary transition-colors"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </Link>
+
+          {/* User Avatar */}
+          <div
+            title={`${userProfile.name} (${userProfile.role})`}
+            className="flex h-7 w-7 items-center justify-center rounded-[4px] bg-accent-primary text-background font-display text-xs font-semibold select-none shadow-sm cursor-pointer"
+            onClick={toggleSidebar}
+          >
+            {userProfile.avatarLetter}
+          </div>
+        </div>
+      </aside>
+    )
+  }
+
   return (
     <aside
       className={`relative flex h-screen w-[280px] shrink-0 select-none flex-col justify-between border-r border-border bg-surface-1 text-text-body font-body ${className}`}
     >
       <div className="flex h-full flex-col overflow-hidden">
-        {/* Brand Header */}
-        <div className="border-b border-border/80 px-5 py-4">
-          <Link to="/" className="group block">
-            <div className="flex items-baseline justify-between">
+        {/* Brand Header with Minimize / Collapse Trigger */}
+        <div className="border-b border-border/80 px-5 py-4 flex items-center justify-between">
+          <Link to="/" className="group block flex-1">
+            <div className="flex items-baseline justify-between pr-2">
               <span className="font-display text-base font-semibold tracking-wider text-text-primary group-hover:text-accent-primary transition-colors">
                 AI ARTIFACT
               </span>
@@ -85,6 +234,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
               STUDIO
             </div>
           </Link>
+
+          {/* Minimize / Close Sidebar Button */}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            title="Minimize sidebar (⌘B)"
+            aria-label="Minimize sidebar"
+            className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-border/80 bg-surface-2/70 text-text-muted hover:text-accent-primary hover:border-accent-primary/60 transition-all cursor-pointer shrink-0"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+            </svg>
+          </button>
         </div>
 
         {/* Quick Actions & Navigation Section */}
@@ -137,7 +299,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <AmberUnderlineWrapper active={isActive}>
                     <span>{item.label}</span>
                   </AmberUnderlineWrapper>
-                  {item.count && (
+                  {item.id === 'chats' ? (
+                    <span
+                      className={`font-mono text-[11px] transition-colors ${
+                        isActive
+                          ? 'text-accent-primary'
+                          : 'text-text-muted group-hover:text-text-body'
+                      }`}
+                    >
+                      {chatSessions.length}
+                    </span>
+                  ) : item.count ? (
                     <span
                       className={`font-mono text-[11px] transition-colors ${
                         isActive
@@ -147,7 +319,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                       {item.count}
                     </span>
-                  )}
+                  ) : null}
                 </Link>
               )
             })}
@@ -198,6 +370,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <Link
                     key={chat.id}
                     to={chat.path}
+                    onClick={() => loadChatSession(chat.id)}
                     className="group flex items-center justify-between py-1 text-xs text-text-body transition-colors hover:text-text-primary"
                   >
                     <AmberUnderlineWrapper className="max-w-[210px]">
@@ -225,7 +398,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
 
           {/* Recent Chats */}
-          {recentChats.length > 0 && (
+          {dynamicRecentChats.length > 0 && (
             <section aria-labelledby="recents-heading">
               <span
                 id="recents-heading"
@@ -234,10 +407,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 RECENTS
               </span>
               <nav className="space-y-1">
-                {recentChats.map((recent) => (
+                {dynamicRecentChats.map((recent) => (
                   <Link
                     key={recent.id}
                     to={recent.path}
+                    onClick={() => loadChatSession(recent.id)}
                     className="group block py-1 text-xs text-text-body transition-colors hover:text-text-primary"
                   >
                     <AmberUnderlineWrapper className="w-full">

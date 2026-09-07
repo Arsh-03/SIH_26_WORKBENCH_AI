@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { mockChatSessions } from '../lib/mockData'
+import { useWorkbench } from '../lib/WorkbenchContext'
 import type { ChatSession } from '../lib/types'
 
 /**
@@ -16,8 +16,9 @@ export const ChatsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'pinned' | 'recent'>('all')
   const navigate = useNavigate()
+  const { chatSessions, loadChatSession } = useWorkbench()
 
-  const filteredChats = mockChatSessions.filter((chat) => {
+  const filteredChats = chatSessions.filter((chat) => {
     const matchesQuery =
       !searchQuery.trim() ||
       chat.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -31,6 +32,7 @@ export const ChatsPage: React.FC = () => {
   })
 
   const handleSelectChat = (chat: ChatSession) => {
+    loadChatSession(chat.id)
     navigate(`/chat/${chat.id}`)
   }
 
@@ -43,7 +45,7 @@ export const ChatsPage: React.FC = () => {
             Chats
           </h1>
           <span className="font-mono text-xs text-text-muted">
-            {mockChatSessions.length} total sessions
+            {chatSessions.length} total sessions
           </span>
         </div>
         <p className="font-display text-sm italic text-text-muted">

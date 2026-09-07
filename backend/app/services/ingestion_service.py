@@ -49,18 +49,29 @@ class DocumentIngestionService:
         total_pages = 1
 
         if file_type.lower() in ["pdf", ".pdf", "application/pdf"]:
+            fitz = None
             try:
-                import fitz
-                doc = fitz.open(filepath)
-                total_pages = len(doc)
-                for page_num in range(total_pages):
-                    page = doc[page_num]
-                    text = page.get_text("text")
-                    if text.strip():
-                        page_chunks = self.chunk_text(text, page_number=page_num + 1)
-                        all_chunks.extend(page_chunks)
-                doc.close()
+                import pymupdf as fitz
             except ImportError:
+                try:
+                    import fitz
+                except ImportError:
+                    pass
+
+            if fitz:
+                try:
+                    doc = fitz.open(filepath)
+                    total_pages = len(doc)
+                    for page_num in range(total_pages):
+                        page = doc[page_num]
+                        text = page.get_text("text")
+                        if text.strip():
+                            page_chunks = self.chunk_text(text, page_number=page_num + 1)
+                            all_chunks.extend(page_chunks)
+                    doc.close()
+                except Exception as e:
+                    logger.error(f"Error extracting PDF text from {filepath}: {e}")
+            else:
                 logger.warning("PyMuPDF (fitz) not installed. Using raw text parser fallback for PDF.")
                 try:
                     with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
@@ -68,9 +79,8 @@ class DocumentIngestionService:
                     all_chunks = self.chunk_text(text, page_number=1)
                 except Exception as e:
                     logger.error(f"Error extracting PDF fallback: {e}")
-            except Exception as e:
-                logger.error(f"Error extracting PDF text from {filepath}: {e}")
         else:
+
             # For plain text, markdown, CSV, logs, etc.
             try:
                 with open(filepath, "r", encoding="utf-8", errors="ignore") as f:

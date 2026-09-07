@@ -11,8 +11,10 @@ async def execute_in_sandbox(payload: SandboxExecuteRequest):
     Enforces air-gap, memory quota, and timeout constraints.
     """
     try:
-        res = await sandbox_service.execute_python_code(
+        res = await sandbox_service.execute_code(
             code=payload.code,
+            language=payload.language or "python",
+            stdin_input=payload.stdin,
             timeout_seconds=payload.timeout_seconds,
             memory_limit_mb=payload.memory_limit_mb
         )

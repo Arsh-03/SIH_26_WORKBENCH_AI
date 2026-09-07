@@ -33,7 +33,45 @@ export const ChatPage: React.FC = () => {
   } = useWorkbench()
 
   const [isCollapsingCards, setIsCollapsingCards] = useState(false)
+  const [splitPercent, setSplitPercent] = useState<number>(46)
+  const [isDragging, setIsDragging] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Drag resizer logic for fluid split adjusting
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging || !containerRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      const newPercent = ((e.clientX - rect.left) / rect.width) * 100
+      // Clamp between 20% and 80% for balanced usability
+      const clamped = Math.min(Math.max(newPercent, 20), 80)
+      setSplitPercent(clamped)
+    }
+
+    const handleMouseUp = () => {
+      if (isDragging) {
+        setIsDragging(false)
+      }
+    }
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove)
+      window.addEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+    } else {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isDragging])
 
   // Load chat session if route param is present
   useEffect(() => {
@@ -77,25 +115,27 @@ export const ChatPage: React.FC = () => {
   const hasMessages = messages.length > 0
 
   return (
-    <div className="relative flex h-full w-full overflow-hidden bg-background">
+    <div ref={containerRef} className="relative flex h-full w-full overflow-hidden bg-background">
       {/* 
         Chat Pane:
         - Full width when in Zero State or Active Chat without artifact
-        - 46% width when in Split View (DESIGN.md Section 1 & Section 5)
-        - Gentle spring on width change (DESIGN.md Section 6: overshoot under 2%)
+        - Resizable width when in Split View (default 46%, user draggable)
       */}
       <motion.div
         animate={{
-          width: isArtifactOpen ? '46%' : '100%',
+          width: isArtifactOpen ? `${splitPercent}%` : '100%',
         }}
-        transition={{
-          type: 'spring',
-          stiffness: 260,
-          damping: 28,
-          mass: 0.9,
-          // Spring overshoot under 2% per DESIGN.md Section 6
-        }}
-        className="relative flex h-full flex-col overflow-hidden min-w-[360px]"
+        transition={
+          isDragging
+            ? { duration: 0 }
+            : {
+                type: 'spring',
+                stiffness: 260,
+                damping: 28,
+                mass: 0.9,
+              }
+        }
+        className="relative flex h-full flex-col overflow-hidden min-w-[300px]"
       >
         {!hasMessages ? (
           /* =================================================================
@@ -241,22 +281,63 @@ export const ChatPage: React.FC = () => {
       </motion.div>
 
       {/* 
-        Artifact Right Pane: 54% width in Split View
+        Interactive Draggable Split Resizer (Visible in Split View)
+        - Drag horizontally to expand or shrink the split panes
+        - Double-click to reset to default 46% / 54% ratio
+      */}
+      {isArtifactOpen && activeArtifact && (
+        <div
+          role="separator"
+          aria-label="Resize Split View"
+          onMouseDown={() => setIsDragging(true)}
+          onDoubleClick={() => setSplitPercent(46)}
+          title="Drag to resize split panes · Double-click to reset"
+          className={`relative z-30 flex h-full w-2.5 -mx-1.5 cursor-col-resize items-center justify-center transition-colors group select-none ${
+            isDragging ? 'bg-accent-primary/20' : 'hover:bg-accent-primary/20'
+          }`}
+        >
+          {/* Subtle line */}
+          <div
+            className={`h-full w-[1px] transition-colors ${
+              isDragging ? 'bg-accent-primary shadow-[0_0_8px_rgba(217,122,63,0.7)]' : 'bg-border group-hover:bg-accent-primary/80'
+            }`}
+          />
+          {/* Centered Grab Handle Pill with dots */}
+          <div
+            className={`absolute top-1/2 -translate-y-1/2 h-8 w-1.5 rounded-full flex flex-col items-center justify-center gap-0.5 transition-all ${
+              isDragging
+                ? 'bg-accent-primary scale-y-125 shadow-sm'
+                : 'bg-border/80 group-hover:bg-accent-primary'
+            }`}
+          >
+            <span className="w-0.5 h-0.5 rounded-full bg-surface-1" />
+            <span className="w-0.5 h-0.5 rounded-full bg-surface-1" />
+            <span className="w-0.5 h-0.5 rounded-full bg-surface-1" />
+          </div>
+        </div>
+      )}
+
+      {/* 
+        Artifact Right Pane: Resizable width in Split View (default 54%)
         Collapsible via close button, asymmetric on purpose (DESIGN.md Section 1)
       */}
       <AnimatePresence>
         {isArtifactOpen && activeArtifact && (
           <motion.div
             initial={{ width: '0%', opacity: 0 }}
-            animate={{ width: '54%', opacity: 1 }}
+            animate={{ width: `${100 - splitPercent}%`, opacity: 1 }}
             exit={{ width: '0%', opacity: 0 }}
-            transition={{
-              type: 'spring',
-              stiffness: 260,
-              damping: 28,
-              mass: 0.9,
-            }}
-            className="relative h-full flex flex-col overflow-hidden"
+            transition={
+              isDragging
+                ? { duration: 0 }
+                : {
+                    type: 'spring',
+                    stiffness: 260,
+                    damping: 28,
+                    mass: 0.9,
+                  }
+            }
+            className="relative h-full flex flex-col overflow-hidden min-w-[320px]"
           >
             <ArtifactPanel
               artifact={activeArtifact}

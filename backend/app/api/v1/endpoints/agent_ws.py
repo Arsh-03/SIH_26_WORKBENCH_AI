@@ -28,8 +28,12 @@ async def agent_websocket_endpoint(websocket: WebSocket, session_id: str):
                 continue
 
             action = data.get("action")
+            if not action and "prompt" in data:
+                action = "run_agent"
+
             if action == "run_agent":
                 # Validate payload with Pydantic
+
                 try:
                     run_req = AgentRunRequest(**data)
                 except Exception as val_err:

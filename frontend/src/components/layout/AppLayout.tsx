@@ -1,5 +1,6 @@
 import React from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
 import { FilmGrain } from './FilmGrain'
 import { Sidebar } from './Sidebar'
 import { CommandPalette } from './CommandPalette'
@@ -11,7 +12,12 @@ import { useWorkbench } from '../../lib/WorkbenchContext'
  * the Sidebar navigation, global Command Palette (⌘K), and outlet for active routes.
  */
 export const AppLayout: React.FC = () => {
-  const { isCmdPaletteOpen, setIsCmdPaletteOpen, resetToNewChat } = useWorkbench()
+  const {
+    isCmdPaletteOpen,
+    setIsCmdPaletteOpen,
+    resetToNewChat,
+    isSidebarOpen,
+  } = useWorkbench()
   const navigate = useNavigate()
 
   const handleNewChat = () => {
@@ -24,11 +30,22 @@ export const AppLayout: React.FC = () => {
       {/* Analog film-grain overlay across entire viewport */}
       <FilmGrain />
 
-      {/* Persistent Left Sidebar */}
-      <Sidebar
-        onOpenCmdPalette={() => setIsCmdPaletteOpen(true)}
-        onNewChat={handleNewChat}
-      />
+      {/* Collapsible Left Sidebar with Spring Animation (280px Full <-> 56px Icon Rail) */}
+      <motion.div
+        animate={{ width: isSidebarOpen ? 280 : 56 }}
+        transition={{
+          type: 'spring',
+          stiffness: 280,
+          damping: 28,
+          mass: 0.9,
+        }}
+        className="h-full shrink-0 overflow-hidden"
+      >
+        <Sidebar
+          onOpenCmdPalette={() => setIsCmdPaletteOpen(true)}
+          onNewChat={handleNewChat}
+        />
+      </motion.div>
 
       {/* Global Command Palette modal */}
       <CommandPalette
