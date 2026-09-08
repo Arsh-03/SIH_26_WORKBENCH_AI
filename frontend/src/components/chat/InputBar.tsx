@@ -37,6 +37,7 @@ export const InputBar: React.FC<InputBarProps> = ({
     setScopeFiles,
     activeTools,
     toggleTool,
+    messages,
     isStreaming: ctxIsStreaming,
     stopStreaming: ctxStopStreaming,
     sendMessage: ctxSendMessage,
@@ -50,7 +51,11 @@ export const InputBar: React.FC<InputBarProps> = ({
   const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false)
   const [slashQuery, setSlashQuery] = useState('')
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
+  const [isAtMenuOpen, setIsAtMenuOpen] = useState(false)
+  const [atQuery, setAtQuery] = useState('')
+  const [isDragOver, setIsDragOver] = useState(false)
   const [isSendFlashing, setIsSendFlashing] = useState(false)
+
 
   // Voice Input (Speech-to-Text & Audio Visualizer) State
   const [isListening, setIsListening] = useState(false)
@@ -296,7 +301,46 @@ export const InputBar: React.FC<InputBarProps> = ({
     )
   })
 
-  // Detect slash commands and track typed query
+  // Filter @ file mentions (session artifacts + scope files)
+  const availableAtFiles = React.useMemo(() => {
+    const list: string[] = scopeFiles.map((s) => s.name)
+    messages.forEach((m) => {
+      if (m.artifact && !list.includes(m.artifact.title)) {
+        list.push(m.artifact.title)
+      }
+    })
+    return list.filter((f) => !atQuery || f.toLowerCase().includes(atQuery.toLowerCase()))
+  }, [scopeFiles, messages, atQuery])
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const droppedFiles = Array.from(e.dataTransfer.files)
+      const newScopes = droppedFiles.map((f) => ({
+        id: f.name,
+        name: f.name,
+      }))
+      setScopeFiles([...scopeFiles, ...newScopes])
+      droppedFiles.forEach((f) => {
+        api.uploadDocument('default_workspace', f).catch((err) => {
+          console.warn('Document upload notice:', err)
+        })
+      })
+    }
+  }
+
+  // Detect slash commands and @ file mentions
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value
     setInputText(val)
@@ -304,15 +348,36 @@ export const InputBar: React.FC<InputBarProps> = ({
     if (val.startsWith('/')) {
       const spaceIdx = val.indexOf(' ')
       if (spaceIdx === -1) {
-        // Still typing command name, e.g. "/exp"
         const query = val.slice(1)
         setSlashQuery(query)
         setIsSlashMenuOpen(true)
+        setIsAtMenuOpen(false)
         setSlashSelectedIndex(0)
         return
       }
     }
+
+    const atIdx = val.lastIndexOf('@')
+    if (atIdx !== -1 && (atIdx === 0 || val[atIdx - 1] === ' ')) {
+      const query = val.slice(atIdx + 1)
+      setAtQuery(query)
+      setIsAtMenuOpen(true)
+      setIsSlashMenuOpen(false)
+      return
+    }
+
     setIsSlashMenuOpen(false)
+    setIsAtMenuOpen(false)
+  }
+
+  // Insert selected @ file mention and focus input
+  const handleSelectAtFile = (fileName: string) => {
+    const atIdx = inputText.lastIndexOf('@')
+    const prefix = atIdx !== -1 ? inputText.slice(0, atIdx) : inputText
+    setInputText(`${prefix}@${fileName} `)
+    setIsAtMenuOpen(false)
+    setAtQuery('')
+    textareaRef.current?.focus()
   }
 
   // Insert selected slash command and focus input
@@ -322,6 +387,7 @@ export const InputBar: React.FC<InputBarProps> = ({
     setSlashQuery('')
     textareaRef.current?.focus()
   }
+
 
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault()
@@ -574,8 +640,51 @@ export const InputBar: React.FC<InputBarProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Floating Elevation 2 Input Container with 1px offset shadow */}
-      <div className="relative flex flex-col rounded-[4px] border border-border bg-surface-2 shadow-[0_4px_0_#110E0A] transition-all">
+      {/* @ File Reference Dropdown */}
+      <AnimatePresence>
+        {isAtMenuOpen && availableAtFiles.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            transition={{ duration: 0.12, ease: 'easeOut' }}
+            className="absolute bottom-full left-6 mb-2 w-80 rounded-[4px] border border-border bg-surface-2 p-1.5 shadow-xl z-30 space-y-0.5"
+          >
+            <div className="flex items-center justify-between px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-text-muted border-b border-border/40">
+              <span>ATTACH ARTIFACT REFERENCE</span>
+              {atQuery && (
+                <span className="text-accent-primary">matching &ldquo;{atQuery}&rdquo;</span>
+              )}
+            </div>
+            {availableAtFiles.map((file) => (
+              <button
+                key={file}
+                type="button"
+                onClick={() => handleSelectAtFile(file)}
+                className="w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[2px] transition-colors cursor-pointer border-l-2 border-transparent hover:border-accent-primary hover:bg-surface-1 text-text-body"
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <span className="font-mono text-xs text-accent-primary font-bold">@</span>
+                  <span className="font-mono text-xs text-text-primary truncate">{file}</span>
+                </div>
+                <span className="font-mono text-[10px] text-accent-primary shrink-0 font-semibold">Attach</span>
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Elevation 2 Input Container with 1px offset shadow & Drag/Drop highlighting */}
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`relative flex flex-col rounded-[4px] border bg-surface-2 shadow-[0_4px_0_#110E0A] transition-all ${
+          isDragOver
+            ? 'border-accent-primary bg-accent-primary/5 ring-2 ring-accent-primary/50'
+            : 'border-border'
+        }`}
+      >
         {/* Model Indicator Strip */}
         <div className="flex items-center justify-between border-b border-border/50 px-4 py-2">
           <div className="flex items-center gap-2">

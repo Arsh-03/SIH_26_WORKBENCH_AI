@@ -301,7 +301,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               }
               reject(new Error('WebSocket connection timeout'))
             }
-          }, 3000)
+          }, 60000)
 
           socket.onopen = () => {
             wsActive = true
@@ -338,7 +338,16 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                   duration: 'Executing sovereign tools…',
                   steps: [...liveSteps],
                 })
+              } else if (frame.event === 'token') {
+                if (frame.token) {
+                  liveSteps.push(`Streaming generation…`)
+                  setCurrentThinking((prev) => ({
+                    duration: 'Generating output (Live Stream)…',
+                    steps: prev?.steps || liveSteps,
+                  }))
+                }
               } else if (frame.event === 'tool_result') {
+
                 liveSteps.push(`Tool completed: ${frame.tool_name || 'done'}`)
                 setCurrentThinking({
                   duration: 'Synthesizing output…',
@@ -351,6 +360,9 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                   sender: 'model',
                   text: frame.content || '',
                   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  modelUsed: frame.metrics?.model_used || 'llama3.1:8b',
+                  modelCapability: frame.metrics?.model_capability || 'general_chat',
+                  routingReason: frame.metrics?.routing_reason || 'Dynamic Model Router allocation',
                   thinkingDuration: `${frame.metrics?.execution_time_ms || 420}ms (Sovereign Enclave)`,
                   thinkingSteps: liveSteps.length > 0 ? liveSteps : [
                     'Sovereign AI graph execution verified',
@@ -358,8 +370,10 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                   ],
                   artifact: frame.artifact || undefined,
                 }
+
                 if (frame.artifact) {
                   setActiveArtifact(frame.artifact)
+                  setIsArtifactOpen(true)
                 }
                 setMessages((prev) => {
                   const updated = [...prev, modelMsg]

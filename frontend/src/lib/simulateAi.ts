@@ -19,24 +19,35 @@ export interface ModelContext {
 
 /**
  * simulateModelResponse
- * Stand-in for future real backend / streaming API call.
- * Designed with a signature that mirrors a real LLM endpoint request/response.
- * When integrating a real backend, only this function needs to be replaced with a fetch/stream call.
+ * Stand-in for real backend / streaming API call when socket is offline or in simulation mode.
  */
 export async function simulateModelResponse(
   userPrompt: string,
   context: ModelContext = {}
 ): Promise<SimulatedAiResponse> {
-  // Simulated network & reasoning latency (~1.4s - 2.0s)
-  const delay = Math.floor(Math.random() * 600) + 1400
-  await new Promise((resolve) => setTimeout(resolve, delay))
+  const promptLower = userPrompt.trim().toLowerCase()
 
-  const promptLower = userPrompt.toLowerCase()
+  // Scenario 0: Conversational Greetings (hey, hi, hello)
+  const isGreeting = /^(hey|hi|hello|greetings|good morning|good afternoon|good evening|sup|yo)\b/i.test(promptLower)
+  if (isGreeting || promptLower.length <= 4) {
+    return {
+      thinkingDuration: `Thought for 0.3 seconds`,
+      thinkingSteps: [
+        'Recognized conversational input intent',
+        'Initialized sovereign assistant persona',
+      ],
+      text: `Hello! I am your Sovereign AI Engineering Workbench Assistant. How can I help you today with your code, industrial SOP documents, or system architecture?`,
+    }
+  }
+
+  // Simulated latency for complex engineering queries
+  const delay = Math.floor(Math.random() * 400) + 1000
+  await new Promise((resolve) => setTimeout(resolve, delay))
   const durationSeconds = (delay / 1000).toFixed(1)
 
   // Context-aware tool notes
   const toolNotes: string[] = []
-  if (context.activeTools?.webSearch) toolNotes.push('Indexed current npm package landscape via Web Search')
+  if (context.activeTools?.webSearch) toolNotes.push('Indexed current technical landscape via Web Search')
   if (context.activeTools?.codeExecution) toolNotes.push('Executed TypeScript AST validation sandbox')
   if (context.activeTools?.deepResearch) toolNotes.push('Evaluated benchmark comparisons from memory cache')
 
@@ -47,7 +58,7 @@ export async function simulateModelResponse(
       thinkingSteps: [
         'Analyzing sliding window log vs sliding window counter trade-offs...',
         'Designing Redis multi/exec atomic pipeline to prevent race conditions under high concurrency...',
-        'Constructing Fastify preHandler hook with standard RateLimit headers (Retry-After, X-RateLimit-Remaining)...',
+        'Constructing Fastify preHandler hook with standard RateLimit headers...',
         ...toolNotes,
       ],
       text: `I've implemented a sliding window counter rate limiter designed for high-concurrency microservices. It leverages Redis transactions to guarantee atomic counter increments with sub-millisecond overhead.`,
@@ -105,23 +116,10 @@ export class SlidingWindowLimiter {
   }
 }`,
           },
-          {
-            name: 'rateLimiter.test.ts',
-            language: 'typescript',
-            content: `import { describe, it, expect, beforeEach } from 'vitest'
-import { SlidingWindowLimiter } from './RateLimiter'
-
-describe('SlidingWindowLimiter', () => {
-  it('allows requests within window capacity', async () => {
-    // Verified atomic execution test
-  })
-})`,
-          },
         ],
         diffPreview: [
           { type: 'deletion', content: '- const count = await redis.get(key) // Race condition prone' },
           { type: 'addition', content: '+ const pipeline = this.redis.pipeline() // Atomic sliding window' },
-          { type: 'context', content: '  pipeline.zadd(redisKey, now, `${now}:${Math.random()}`)' },
         ],
       },
     }
@@ -133,11 +131,11 @@ describe('SlidingWindowLimiter', () => {
       thinkingDuration: `Thought for ${durationSeconds} seconds`,
       thinkingSteps: [
         'Checking physical table block ordering and correlation with timestamp column...',
-        'Selecting pages_per_range parameter based on block write distribution (128 pages = 1MB blocks)...',
+        'Selecting pages_per_range parameter based on block write distribution...',
         'Generating idempotent DDL migration with CONCURRENTLY index creation...',
         ...toolNotes,
       ],
-      text: `Here is the optimized PostgreSQL migration. A BRIN (Block Range Index) is ideal for append-only event tables because it stores summary ranges for pages rather than individual rows, saving over 90% disk space compared to B-trees.`,
+      text: `Here is the optimized PostgreSQL migration using BRIN (Block Range Index), ideal for append-only event tables.`,
       artifact: {
         ...mockArtifactData,
         id: `artifact-brin-${Date.now()}`,
@@ -148,95 +146,42 @@ describe('SlidingWindowLimiter', () => {
           {
             name: '001_brin_migration.sql',
             language: 'sql',
-            content: `-- Up Migration: Add BRIN index on time-series telemetry events
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_telemetry_events_created_at_brin
+            content: `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_telemetry_events_created_at_brin
 ON telemetry_events
 USING brin (created_at)
-WITH (pages_per_range = 128);
-
--- Query verification
-EXPLAIN (ANALYZE, BUFFERS)
-SELECT * FROM telemetry_events
-WHERE created_at >= NOW() - INTERVAL '7 days';`,
+WITH (pages_per_range = 128);`,
           },
-        ],
-        diffPreview: [
-          { type: 'deletion', content: '- CREATE INDEX idx_events_btree ON telemetry_events(created_at); -- 8.2 GB index' },
-          { type: 'addition', content: '+ CREATE INDEX idx_events_brin ON telemetry_events USING brin(created_at); -- 14 MB index' },
         ],
       },
     }
   }
 
-  // Scenario 3: Explain command
-  if (promptLower.startsWith('/explain')) {
-    const subject = userPrompt.replace(/^\/explain\s*/i, '').trim() || 'the active module'
+  // Scenario 3: Explicit Component / Code Request
+  if (promptLower.includes('dashboard') || promptLower.includes('component') || promptLower.includes('react') || promptLower.includes('ui')) {
     return {
       thinkingDuration: `Thought for ${durationSeconds} seconds`,
       thinkingSteps: [
-        `Parsing structure and architectural flow for ${subject}...`,
-        'Tracing lifecycle from mount to tear-down...',
-        'Documenting concurrency boundaries and memory guarantees...',
+        `Analyzing component specs for "${userPrompt.slice(0, 30)}..."`,
+        'Constructing responsive React component with Darkroom Editorial styling...',
         ...toolNotes,
       ],
-      text: `### Architecture Explanation: ${subject}\n\n1. **Data Ingestion Flow**: Telemetry data streams asynchronously via Web Workers, keeping the UI thread strictly at 60 FPS.\n2. **Virtualization Strategy**: DOM nodes are recycled using fixed page windowing, ensuring zero memory leak even with 100k+ events.\n3. **Decoupled State**: Event dispatch uses an immutable ring buffer. No unnecessary re-renders occur on unmounted sibling routes.`,
-    }
-  }
-
-  // Scenario 4: Test generation
-  if (promptLower.startsWith('/test')) {
-    return {
-      thinkingDuration: `Thought for ${durationSeconds} seconds`,
-      thinkingSteps: [
-        'Analyzing edge cases: zero records, network disconnection, malformed payloads...',
-        'Formulating unit test suites using Vitest and Mock Service Worker...',
-        'Verifying assertion coverage reaches 100% on branch paths...',
-        ...toolNotes,
-      ],
-      text: `I have generated comprehensive unit and integration tests covering standard execution, threshold timeouts, and edge cases for null payloads.`,
+      text: `I have generated the requested UI component according to the Darkroom Editorial design system.`,
       artifact: {
         ...mockArtifactData,
-        id: `artifact-tests-${Date.now()}`,
-        title: 'telemetry.spec.ts',
-        badge: 'Vitest · TypeScript',
-        activeFile: 'telemetry.spec.ts',
-        files: [
-          {
-            name: 'telemetry.spec.ts',
-            language: 'typescript',
-            content: `import { describe, it, expect, vi } from 'vitest'
-
-describe('Telemetry Ingestion Suite', () => {
-  it('discards records older than window threshold', () => {
-    const now = Date.now()
-    const validRecord = { timestamp: now - 1000, payload: 'ok' }
-    const staleRecord = { timestamp: now - 86400000, payload: 'stale' }
-    
-    expect(validRecord.timestamp).toBeGreaterThan(now - 5000)
-    expect(staleRecord.timestamp).toBeLessThan(now - 5000)
-  })
-})`,
-          },
-        ],
+        id: `artifact-${Date.now()}`,
+        title: 'EnhancedDashboard.tsx',
       },
     }
   }
 
-  // Default: Return dashboard / code artifact with contextual message
+  // Default: Conversational & Technical Explanation without hardcoded code artifacts
   return {
     thinkingDuration: `Thought for ${durationSeconds} seconds`,
     thinkingSteps: [
-      `Analyzing input: "${userPrompt.slice(0, 48)}..."`,
-      'Inspecting syntax tree and dependency graph in scope...',
-      'Constructing responsive TypeScript component with Darkroom Editorial aesthetics...',
-      'Synthesizing live interactive preview and diff verification...',
+      `Analyzing engineering request: "${userPrompt.slice(0, 48)}..."`,
+      'Evaluating system architecture and operational parameters...',
       ...toolNotes,
     ],
-    text: `I have prepared the requested implementation according to the Darkroom Editorial design system. The code is modularized, typed with strict TypeScript, and ready for immediate interactive preview.`,
-    artifact: {
-      ...mockArtifactData,
-      id: `artifact-${Date.now()}`,
-      title: 'EnhancedDashboard.tsx',
-    },
+    text: `I have analyzed your query regarding "${userPrompt}". \n\nPlease let me know if you would like me to generate specific code implementations, run Python data calculations in the sandbox, or search through uploaded SOP documents.`,
   }
 }

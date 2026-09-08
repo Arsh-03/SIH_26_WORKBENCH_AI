@@ -86,10 +86,11 @@ export interface ArtifactData {
   title: string
   badge: string
   activeFile: string
+  download_url?: string
   files: ArtifactFile[]
-  versions: ArtifactVersion[]
-  diffPreview: DiffLine[]
-  terminalOutput: string
+  versions?: ArtifactVersion[]
+  diffPreview?: DiffLine[]
+  terminalOutput?: string
 }
 
 export interface ChatMessage {
@@ -97,6 +98,9 @@ export interface ChatMessage {
   sender: 'user' | 'model'
   text: string
   timestamp: string
+  modelUsed?: string
+  modelCapability?: string
+  routingReason?: string
   thinkingDuration?: string
   thinkingSteps?: string[]
   artifact?: ArtifactData

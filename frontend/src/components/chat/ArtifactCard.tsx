@@ -58,6 +58,17 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          {artifact.download_url && (
+            <a
+              href={artifact.download_url}
+              download
+              className="font-mono text-xs font-semibold text-accent-primary bg-accent-primary/10 border border-accent-primary/40 px-2 py-0.5 rounded-[2px] hover:bg-accent-primary/20 transition-colors flex items-center gap-1"
+            >
+              <span>Download</span>
+              <span>↓</span>
+            </a>
+          )}
+
           {artifact.diffPreview && artifact.diffPreview.length > 0 && (
             <button
               type="button"

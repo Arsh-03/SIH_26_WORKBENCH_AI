@@ -14,3 +14,8 @@ class AgentState(TypedDict):
     final_content: str
     citations: List[Dict[str, Any]]
     artifact_paths: List[str]
+    selected_model: Optional[str]
+    model_capability: Optional[str]
+    routing_reason: Optional[str]
+    fallback_chain: Optional[List[str]]
+

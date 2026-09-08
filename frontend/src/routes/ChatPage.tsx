@@ -35,8 +35,23 @@ export const ChatPage: React.FC = () => {
   const [isCollapsingCards, setIsCollapsingCards] = useState(false)
   const [splitPercent, setSplitPercent] = useState<number>(46)
   const [isDragging, setIsDragging] = useState(false)
+  const [isBucketOpen, setIsBucketOpen] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Deduplicated list of artifacts generated in the active session
+  const sessionArtifacts = React.useMemo(() => {
+    const list: any[] = []
+    const seen = new Set<string>()
+    messages.forEach((m) => {
+      if (m.artifact && !seen.has(m.artifact.id || m.artifact.title)) {
+        seen.add(m.artifact.id || m.artifact.title)
+        list.push(m.artifact)
+      }
+    })
+    return list
+  }, [messages])
+
 
   // Drag resizer logic for fluid split adjusting
   useEffect(() => {
@@ -226,9 +241,105 @@ export const ChatPage: React.FC = () => {
              - Inline Artifact Cards with diff previews and "Open →" lift
              - Bottom pinned input bar
              ================================================================= */
-          <div className="flex flex-1 flex-col h-full overflow-hidden">
+          <div className="flex flex-1 flex-col h-full overflow-hidden relative">
+            {/* Active Chat Top Header Bar with Session Artifacts Bucket CTA */}
+            <div className="flex items-center justify-between border-b border-border/60 bg-surface-1/90 px-6 py-2.5 backdrop-blur-sm shrink-0 z-20">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-accent-primary animate-pulse" />
+                <span className="font-mono text-xs font-semibold text-text-primary tracking-wide">
+                  SESSION WORKBENCH
+                </span>
+              </div>
+
+              {/* Session Artifacts Bucket CTA Button */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsBucketOpen((prev) => !prev)}
+                  className="font-mono text-xs font-semibold text-accent-primary bg-surface-2 border border-accent-primary/40 hover:border-accent-primary px-3 py-1 rounded-[3px] shadow-sm flex items-center gap-2 transition-all cursor-pointer"
+                >
+                  <span>📦 Session Artifacts</span>
+                  <span className="bg-accent-primary text-background text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+                    {sessionArtifacts.length}
+                  </span>
+                </button>
+
+                {/* Session Artifacts Bucket Drawer Overlay */}
+                <AnimatePresence>
+                  {isBucketOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                      transition={{ duration: 0.15, ease: 'easeOut' }}
+                      className="absolute right-0 top-full mt-2 w-80 rounded-[4px] border border-border bg-surface-1 shadow-2xl p-3 z-50 space-y-2 select-none"
+                    >
+                      <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                        <span className="font-mono text-[11px] font-semibold text-text-primary uppercase tracking-wider">
+                          SESSION ARTIFACTS BUCKET ({sessionArtifacts.length})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsBucketOpen(false)}
+                          className="font-mono text-xs text-text-muted hover:text-text-primary cursor-pointer px-1"
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      {sessionArtifacts.length === 0 ? (
+                        <p className="font-body text-xs text-text-muted py-3 text-center italic">
+                          No artifacts generated in this session yet.
+                        </p>
+                      ) : (
+                        <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                          {sessionArtifacts.map((art) => (
+                            <div
+                              key={art.id || art.title}
+                              className="flex items-center justify-between p-2 rounded border border-border/60 bg-surface-2/60 hover:bg-surface-2 transition-colors"
+                            >
+                              <div className="min-w-0 pr-2">
+                                <p className="font-mono text-xs font-semibold text-text-primary truncate">
+                                  {art.title}
+                                </p>
+                                <span className="font-mono text-[9px] text-accent-primary uppercase tracking-wider">
+                                  {art.badge}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {art.download_url && (
+                                  <a
+                                    href={art.download_url}
+                                    download
+                                    className="font-mono text-[10px] text-accent-primary bg-accent-primary/10 border border-accent-primary/30 px-1.5 py-0.5 rounded hover:bg-accent-primary/20 transition-colors"
+                                  >
+                                    ↓
+                                  </a>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    openArtifact(art)
+                                    setIsBucketOpen(false)
+                                  }}
+                                  className="font-mono text-[10px] text-accent-primary bg-surface-1 border border-border px-1.5 py-0.5 rounded hover:border-accent-primary transition-colors cursor-pointer"
+                                >
+                                  Open →
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+
             {/* Scrollable Message Feed */}
             <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+
               <div className="w-full max-w-3xl mx-auto space-y-6">
                 {messages.map((msg) => (
                   <MessageBlock

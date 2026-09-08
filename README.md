@@ -221,6 +221,17 @@ SANDBOX_MEMORY_LIMIT_MB=512
 
 ---
 
+## ⚡ Quick Start (Single Command)
+
+To launch both **Backend Gateway** and **Frontend UI** concurrently in one terminal:
+
+```bash
+python start_all.py
+```
+*(Or double-click `start_all.bat` / run `.\start_all.ps1` on Windows)*
+
+---
+
 ## 🚀 Step-by-Step Execution Guide
 
 ### Step 1: Start the Backend Gateway
