@@ -2,39 +2,23 @@ from typing import Dict, Any
 from ai_engine.state import AgentState
 from ai_engine.router import dynamic_router
 
-def supervisor_node(state: AgentState) -> Dict[str, Any]:
-    """
-    Supervisor Agent analyzes intent, dynamically routes to specialized on-premise models,
-    and orchestrates graph worker nodes.
-    """
-    prompt = state.get("prompt", "").strip()
-    prompt_low = prompt.lower()
+def _build_supervisor_response(routing_res: Dict[str, Any], prompt_low: str, active_doc_ids: list) -> Dict[str, Any]:
     plan = []
-
-    # Dynamic Model Router classification
-    routing_res = dynamic_router.route_query(
-        prompt=prompt,
-        active_document_ids=state.get("active_document_ids", []),
-        has_images=bool(state.get("extracted_elements")),
-        available_models=state.get("available_models", [])
-    )
-
-    # Check for simple conversational greetings
     is_greeting = any(prompt_low.startswith(kw) for kw in ["hey", "hi", "hello", "greetings", "good morning", "good afternoon", "sup", "yo"]) or len(prompt_low) <= 4
 
     if is_greeting:
         plan = ["chat_agent"]
     else:
-        # Technical document / SOP search
-        if state.get("active_document_ids") or any(kw in prompt_low for kw in ["sop", "spec", "boiler", "mawp", "asme", "document", "manual", "procedure", "valve"]):
+        # Technical document / SOP search (only when active docs selected or specific industrial keywords present)
+        if active_doc_ids or any(kw in prompt_low for kw in ["sop", "boiler", "mawp", "asme", "valve"]):
             plan.append("rag_agent")
 
-        # Code execution / calculation / plotting
-        if any(kw in prompt_low for kw in ["plot", "curve", "simulate", "degradation", "calculate", "python", "script", "code", "benchmark", "function", "component"]):
+        # Code execution / calculation / plotting (only if pure code execution requested and NOT a document request)
+        if routing_res["capability"] == "coding" or any(kw in prompt_low for kw in ["plot", "curve", "simulate", "degradation", "execute", "benchmark"]):
             plan.append("code_agent")
 
         # Vision / diagram / image analysis
-        if any(kw in prompt_low for kw in ["image", "diagram", "schematic", "ocr", "photo"]):
+        if routing_res["capability"] == "vision_ocr" or any(kw in prompt_low for kw in ["image", "diagram", "schematic", "ocr", "photo"]):
             plan.append("vision_agent")
 
         if not plan:
@@ -48,4 +32,28 @@ def supervisor_node(state: AgentState) -> Dict[str, Any]:
         "routing_reason": routing_res["routing_reason"],
         "fallback_chain": routing_res["fallback_chain"]
     }
+
+def supervisor_node(state: AgentState) -> Dict[str, Any]:
+    """Synchronous fallback supervisor node."""
+    prompt = state.get("prompt", "").strip()
+    prompt_low = prompt.lower()
+    routing_res = dynamic_router.route_query(
+        prompt=prompt,
+        active_document_ids=state.get("active_document_ids", []),
+        has_images=bool(state.get("extracted_elements")),
+        available_models=state.get("available_models", [])
+    )
+    return _build_supervisor_response(routing_res, prompt_low, state.get("active_document_ids", []))
+
+async def supervisor_node_async(state: AgentState) -> Dict[str, Any]:
+    """Asynchronous supervisor node using LLM-powered dynamic model router."""
+    prompt = state.get("prompt", "").strip()
+    prompt_low = prompt.lower()
+    routing_res = await dynamic_router.route_query_async(
+        prompt=prompt,
+        active_document_ids=state.get("active_document_ids", []),
+        has_images=bool(state.get("extracted_elements")),
+        available_models=state.get("available_models", [])
+    )
+    return _build_supervisor_response(routing_res, prompt_low, state.get("active_document_ids", []))
 

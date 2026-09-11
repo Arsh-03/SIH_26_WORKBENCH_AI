@@ -1,8 +1,10 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import type { ChatMessage, ArtifactData, ScopeFile, ChatSession } from './types'
-import { mockChatSessions, mockArtifactData } from './mockData'
+import { mockArtifactData } from './mockData'
 import { simulateModelResponse } from './simulateAi'
+import { api } from './api'
+import { useAuth } from './AuthContext'
 
 export interface ActiveToolsState {
   webSearch: boolean
@@ -10,26 +12,26 @@ export interface ActiveToolsState {
   deepResearch: boolean
 }
 
-const STORAGE_KEY = 'workbench_chat_sessions'
-
-function loadSavedSessions(): ChatSession[] {
+function loadSavedSessions(userId?: string): ChatSession[] {
+  if (!userId) return []
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(`workbench_chat_sessions_${userId}`)
     if (raw) {
       const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         return parsed
       }
     }
   } catch (e) {
     console.error('Failed to load chat sessions from localStorage:', e)
   }
-  return mockChatSessions
+  return []
 }
 
-function saveSessions(sessions: ChatSession[]) {
+function saveSessions(userId: string | undefined, sessions: ChatSession[]) {
+  if (!userId) return
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions))
+    localStorage.setItem(`workbench_chat_sessions_${userId}`, JSON.stringify(sessions))
   } catch (e) {
     console.error('Failed to save chat sessions to localStorage:', e)
   }
@@ -53,6 +55,7 @@ export interface WorkbenchContextType {
   openArtifact: (artifact: ArtifactData) => void
   closeArtifact: () => void
   toggleArtifactPanel: () => void
+  updateArtifactTerminal: (terminalOutput: string, exitCode?: number, durationMs?: number, terminalCommand?: string) => void
 
   // Scope Files State
   scopeFiles: ScopeFile[]
@@ -66,9 +69,11 @@ export interface WorkbenchContextType {
   // Session Navigation & Persistence
   chatSessions: ChatSession[]
   currentChatId: string | null
-  loadChatSession: (chatId: string) => void
+  loadChatSession: (chatId: string) => Promise<void>
   resetToNewChat: () => void
-  deleteChatSession: (chatId: string) => void
+  deleteChatSession: (chatId: string) => Promise<void>
+  togglePinChat: (chatId: string) => Promise<void>
+  refreshChatSessions: () => Promise<void>
 
   // Global Command Palette
   isCmdPaletteOpen: boolean
@@ -90,7 +95,8 @@ export interface WorkbenchContextType {
 const WorkbenchContext = createContext<WorkbenchContextType | null>(null)
 
 export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>(loadSavedSessions)
+  const { user } = useAuth()
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>(() => loadSavedSessions(user?.id))
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [currentThinking, setCurrentThinking] = useState<{ duration: string; steps: string[] } | null>(null)
@@ -110,18 +116,6 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
-
-  const openSettings = useCallback(() => {
-    setIsSettingsOpen(true)
-  }, [])
-
-  const closeSettings = useCallback(() => {
-    setIsSettingsOpen(false)
-  }, [])
-
-  const toggleSettings = useCallback(() => {
-    setIsSettingsOpen((prev) => !prev)
-  }, [])
 
   const toggleSidebar = useCallback(() => {
     setIsSidebarOpen((prev) => !prev)
@@ -175,7 +169,6 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setScopeFiles([])
         return false
       } else {
-        // Find existing or fallback artifact
         let targetArt = activeArtifact
         if (!targetArt) {
           const foundMsgWithArt = [...messages].reverse().find((m) => m.artifact)
@@ -192,25 +185,58 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     })
   }, [activeArtifact, messages])
 
+  // Update active artifact terminal output
+  const updateArtifactTerminal = useCallback((terminalOutput: string, exitCode: number = 0, durationMs: number = 0, terminalCommand?: string) => {
+    setActiveArtifact((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        terminalOutput,
+        terminalExitCode: exitCode,
+        terminalDurationMs: durationMs,
+        terminalCommand: terminalCommand || prev.terminalCommand,
+      }
+    })
+  }, [])
+
   // Remove a scope file chip
   const removeScopeFile = useCallback((fileId: string) => {
     setScopeFiles((prev) => prev.filter((f) => f.id !== fileId))
   }, [])
 
-  // Load a chat session by ID
-  const loadChatSession = useCallback((chatId: string) => {
-    setCurrentChatId(chatId)
-    const session = chatSessions.find((s) => s.id === chatId)
-    if (session) {
-      setMessages(session.messages || [])
-      const lastArt = [...(session.messages || [])].reverse().find((m) => m.artifact)?.artifact
-      if (lastArt) {
-        setActiveArtifact(lastArt)
-      } else {
-        setActiveArtifact(null)
+  // Load a chat session by ID from SQLite DB
+  const loadChatSession = useCallback(
+    async (chatId: string) => {
+      setCurrentChatId(chatId)
+      try {
+        const fullSession = await api.getChatSession(chatId)
+        if (fullSession && fullSession.messages) {
+          setMessages(fullSession.messages)
+          const lastArt = [...fullSession.messages].reverse().find((m) => m.artifact)?.artifact
+          if (lastArt) {
+            setActiveArtifact(lastArt)
+          } else {
+            setActiveArtifact(null)
+          }
+          return
+        }
+      } catch (err) {
+        console.warn('Loading session from SQLite API failed, falling back to local memory:', err)
       }
-    }
-  }, [chatSessions])
+
+      const localSession = chatSessions.find((s) => s.id === chatId)
+      if (localSession) {
+        setMessages(localSession.messages || [])
+        const lastArt = [...(localSession.messages || [])].reverse().find((m) => m.artifact)?.artifact
+        if (lastArt) {
+          setActiveArtifact(lastArt)
+        } else {
+          setActiveArtifact(null)
+        }
+      }
+    },
+    [chatSessions]
+  )
 
   // Reset to Zero State (New Chat)
   const resetToNewChat = useCallback(() => {
@@ -224,14 +250,48 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setCurrentThinking(null)
   }, [])
 
-  // Delete a chat session
-  const deleteChatSession = useCallback((chatId: string) => {
-    setChatSessions((prev) => {
-      const updated = prev.filter((s) => s.id !== chatId)
-      saveSessions(updated)
-      return updated
-    })
-  }, [])
+  // Delete a chat session from SQLite DB & state
+  const deleteChatSession = useCallback(
+    async (chatId: string) => {
+      try {
+        await api.deleteChatSession(chatId)
+      } catch (e) {
+        console.warn('Failed to delete chat session from SQLite:', e)
+      }
+
+      setChatSessions((prev) => {
+        const updated = prev.filter((s) => s.id !== chatId)
+        saveSessions(user?.id, updated)
+        return updated
+      })
+    },
+    [user?.id]
+  )
+
+  // Pin or unpin a chat session with SQLite DB synchronization
+  const togglePinChat = useCallback(
+    async (chatId: string) => {
+      let nextPinnedState = false
+      setChatSessions((prev) => {
+        const updated = prev.map((s) => {
+          if (s.id === chatId) {
+            nextPinnedState = !s.isPinned
+            return { ...s, isPinned: nextPinnedState }
+          }
+          return s
+        })
+        saveSessions(user?.id, updated)
+        return updated
+      })
+
+      try {
+        await api.updateChatSession(chatId, { is_pinned: nextPinnedState })
+      } catch (e) {
+        console.warn('Failed to update pinned chat status in SQLite backend:', e)
+      }
+    },
+    [user?.id]
+  )
 
   // Stop active streaming/generation
   const stopStreaming = useCallback(() => {
@@ -243,7 +303,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setCurrentThinking(null)
   }, [abortController])
 
-  // Send message with live Backend WebSocket streaming + simulation fallback
+  // Send message with live Backend WebSocket streaming + SQLite persistence + fallback
   const sendMessage = useCallback(
     async (text: string) => {
       const userMsg: ChatMessage = {
@@ -264,6 +324,13 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       })
 
       const sessionId = currentChatId || `sess_${Date.now()}`
+      if (!currentChatId) setCurrentChatId(sessionId)
+
+      // Background persist user message to SQLite DB
+      api.saveChatMessage(sessionId, userMsg).catch((e) => {
+        console.warn('Async SQLite user message save fallback:', e)
+      })
+
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const wsUrl = `${protocol}//${window.location.host}/api/v1/agents/ws/${sessionId}`
 
@@ -277,7 +344,11 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             const existingIdx = prev.findIndex((s) => s.id === sessionId)
             const title = text.length > 38 ? text.slice(0, 38) + '…' : text
             const lastMsg = finalMessages[finalMessages.length - 1]
-            const preview = lastMsg?.text ? (lastMsg.text.length > 80 ? lastMsg.text.slice(0, 80) + '…' : lastMsg.text) : 'Conversation active'
+            const preview = lastMsg?.text
+              ? lastMsg.text.length > 80
+                ? lastMsg.text.slice(0, 80) + '…'
+                : lastMsg.text
+              : 'Conversation active'
             const timestamp = 'Just now'
 
             let updated: ChatSession[]
@@ -305,7 +376,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               }
               updated = [newSession, ...prev]
             }
-            saveSessions(updated)
+            saveSessions(user?.id, updated)
             return updated
           })
         }
@@ -330,22 +401,24 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           socket.onopen = () => {
             wsActive = true
             clearTimeout(timeoutTimer)
-            
+
             const allowedToolsList = ['rag_search']
             if (activeTools.codeExecution) allowedToolsList.push('sandbox_execute')
+            const token = localStorage.getItem('sovereign_auth_token')
 
             const payload = {
               action: 'run_agent',
               workspace_id: 'default_workspace',
               session_id: sessionId,
               prompt: text,
+              token: token,
+              auth_token: token,
               active_document_ids: scopeFiles.map((s) => s.id),
               allowed_tools: allowedToolsList,
               temperature: 0.1,
             }
             socket?.send(JSON.stringify(payload))
           }
-
 
           socket.onmessage = (event) => {
             try {
@@ -371,7 +444,6 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                   }))
                 }
               } else if (frame.event === 'tool_result') {
-
                 liveSteps.push(`Tool completed: ${frame.tool_name || 'done'}`)
                 setCurrentThinking({
                   duration: 'Synthesizing output…',
@@ -388,10 +460,10 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                   modelCapability: frame.metrics?.model_capability || 'general_chat',
                   routingReason: frame.metrics?.routing_reason || 'Dynamic Model Router allocation',
                   thinkingDuration: `${frame.metrics?.execution_time_ms || 420}ms (Sovereign Enclave)`,
-                  thinkingSteps: liveSteps.length > 0 ? liveSteps : [
-                    'Sovereign AI graph execution verified',
-                    'Zero-egress audit trace recorded'
-                  ],
+                  thinkingSteps:
+                    liveSteps.length > 0
+                      ? liveSteps
+                      : ['Sovereign AI graph execution verified', 'Zero-egress audit trace recorded'],
                   artifact: frame.artifact || undefined,
                 }
 
@@ -399,6 +471,12 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                   setActiveArtifact(frame.artifact)
                   setIsArtifactOpen(true)
                 }
+
+                // Persist model response to SQLite
+                api.saveChatMessage(sessionId, modelMsg).catch((e) => {
+                  console.warn('Async SQLite model response save fallback:', e)
+                })
+
                 setMessages((prev) => {
                   const updated = [...prev, modelMsg]
                   persistExchange(updated)
@@ -429,7 +507,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         })
       } catch (wsErr) {
         console.warn('Backend WebSocket unavailable, falling back to simulated inference:', wsErr)
-        
+
         // Fallback to simulation
         const response = await simulateModelResponse(text, {
           activeTools,
@@ -446,28 +524,43 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           artifact: response.artifact,
         }
 
+        if (response.artifact) {
+          setActiveArtifact(response.artifact)
+          setIsArtifactOpen(true)
+        }
+
+        // Save fallback model answer to SQLite DB
+        api.saveChatMessage(sessionId, modelMsg).catch((e) => {
+          console.warn('Async SQLite fallback model save:', e)
+        })
+
         setMessages((prev) => {
           const updated = [...prev, modelMsg]
           const existingIdx = chatSessions.findIndex((s) => s.id === sessionId)
           const title = text.length > 38 ? text.slice(0, 38) + '…' : text
           let updatedSessions: ChatSession[]
           if (existingIdx >= 0) {
-            updatedSessions = chatSessions.map((s) => s.id === sessionId ? { ...s, messages: updated, messageCount: updated.length } : s)
+            updatedSessions = chatSessions.map((s) =>
+              s.id === sessionId ? { ...s, messages: updated, messageCount: updated.length } : s
+            )
           } else {
-            updatedSessions = [{
-              id: sessionId,
-              title,
-              preview: response.text.slice(0, 80) + '…',
-              timestamp: 'Just now',
-              model: 'llama3.1:8b',
-              messageCount: updated.length,
-              isPinned: false,
-              path: `/chat/${sessionId}`,
-              messages: updated,
-            }, ...chatSessions]
+            updatedSessions = [
+              {
+                id: sessionId,
+                title,
+                preview: response.text.slice(0, 80) + '…',
+                timestamp: 'Just now',
+                model: 'llama3.1:8b',
+                messageCount: updated.length,
+                isPinned: false,
+                path: `/chat/${sessionId}`,
+                messages: updated,
+              },
+              ...chatSessions,
+            ]
           }
           setChatSessions(updatedSessions)
-          saveSessions(updatedSessions)
+          saveSessions(user?.id, updatedSessions)
           return updated
         })
       } finally {
@@ -475,9 +568,8 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setCurrentThinking(null)
       }
     },
-    [activeTools, currentChatId, scopeFiles, chatSessions]
+    [activeTools, currentChatId, scopeFiles, chatSessions, user?.id]
   )
-
 
   // Listen for global ⌘K / Ctrl+K keyboard shortcut
   useEffect(() => {
@@ -506,6 +598,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         openArtifact,
         closeArtifact,
         toggleArtifactPanel,
+        updateArtifactTerminal,
         scopeFiles,
         removeScopeFile,
         setScopeFiles,
@@ -516,6 +609,8 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         loadChatSession,
         resetToNewChat,
         deleteChatSession,
+        togglePinChat,
+        refreshChatSessions,
         isCmdPaletteOpen,
         setIsCmdPaletteOpen,
         isSettingsOpen,

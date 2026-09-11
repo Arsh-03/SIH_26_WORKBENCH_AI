@@ -53,9 +53,9 @@ export const mockRecentChats: RecentChat[] = [
 ]
 
 export const mockUserProfile: UserProfile = {
-  name: 'Rashmi',
-  role: 'ARCHIVIST / DEV',
-  avatarLetter: 'R',
+  name: 'Maaz',
+  role: 'LEAD AI ARCHITECT',
+  avatarLetter: 'M',
 }
 
 export const mockCommandPaletteItems: CommandPaletteItem[] = [

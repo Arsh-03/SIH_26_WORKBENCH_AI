@@ -1,5 +1,7 @@
 from fastapi import APIRouter
 from backend.app.api.v1.endpoints import (
+    auth,
+    chats,
     workspaces,
     documents,
     agent_ws,
@@ -12,6 +14,12 @@ from backend.app.api.v1.endpoints import (
 )
 
 api_router = APIRouter()
+
+# Authentication & Operators
+api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+
+# Chat Sessions & Persistent History
+api_router.include_router(chats.router, prefix="/chats", tags=["Chat Persistence"])
 
 # Workspaces & Documents
 api_router.include_router(workspaces.router, prefix="/workspaces", tags=["Workspaces"])
@@ -35,3 +43,4 @@ api_router.include_router(artifacts.router, prefix="/artifacts", tags=["Artifact
 
 # Audio Transcription
 api_router.include_router(audio.router, prefix="/audio", tags=["Audio Transcription"])
+

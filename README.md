@@ -234,14 +234,28 @@ python start_all.py
 
 ## 🚀 Step-by-Step Execution Guide
 
-### Step 1: Start the Backend Gateway
+### Step 1: Install Backend Dependencies & Start Gateway
 
-1. Open a terminal and navigate to the project directory:
+1. Open a terminal and navigate to the project root directory:
    ```bash
    cd SIH_26_WORKBENCH_AI
    ```
 
-2. Start the FastAPI server using `uv` (or `python -m uvicorn`):
+2. Create virtual environment and install dependencies:
+   - **Using `uv` (Recommended)**:
+     ```bash
+     uv venv
+     source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+     uv pip install -r requirements.txt
+     ```
+   - **Using standard `pip`**:
+     ```bash
+     python -m venv .venv
+     source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+     pip install -r requirements.txt
+     ```
+
+3. Start the FastAPI server using `uv` (or `python -m uvicorn`):
    ```bash
    uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
    ```
@@ -254,7 +268,7 @@ python start_all.py
 
 ---
 
-### Step 2: Start the Frontend UI
+### Step 2: Install Frontend Dependencies & Start UI
 
 1. Open a second terminal and navigate to the `frontend/` directory:
    ```bash

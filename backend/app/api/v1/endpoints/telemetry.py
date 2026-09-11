@@ -11,8 +11,17 @@ from backend.app.models.schemas import (
 )
 from backend.app.core.zero_egress import verify_network_isolation
 from backend.app.services.ollama_client import ollama_client
+from backend.app.services.telemetry import telemetry_service
 
 router = APIRouter()
+
+@router.get("/telemetry")
+async def get_hardware_telemetry():
+    """
+    Returns live hardware metrics (CPU, RAM, GPU VRAM, GPU temperature, token rate, air-gap status).
+    """
+    return telemetry_service.get_system_telemetry()
+
 
 @router.get("/health", response_model=SystemHealthResponse)
 async def get_system_health():
@@ -95,5 +104,8 @@ async def get_system_health():
         timestamp=now,
         network_isolation=network_isolation,
         gpu_telemetry=gpu_telemetry,
-        loaded_models=loaded_models
+        loaded_models=loaded_models,
+        ollama_endpoint=settings.OLLAMA_BASE_URL,
+        ollama_running=bool(ollama_health.get("running", False)),
+        available_models=ollama_health.get("available_models", [])
     )
