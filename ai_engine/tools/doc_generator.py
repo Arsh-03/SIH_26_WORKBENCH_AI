@@ -9,7 +9,9 @@ def generate_docx_document(
     title: str,
     content: str,
     citations: Optional[List[Dict[str, Any]]] = None,
-    output_dir: str = "./backend/storage/artifacts"
+    output_dir: str = "./backend/storage/artifacts",
+    author_name: str = "Lead AI Architect",
+    author_title: str = "Lead Operations Engineer"
 ) -> Dict[str, str]:
     """
     Builds a professional, styled Microsoft Word (.docx) document from Markdown text
@@ -18,20 +20,15 @@ def generate_docx_document(
     os.makedirs(output_dir, exist_ok=True)
     doc = docx.Document()
 
-
     # Pre-process placeholder brackets e.g. [Your Name], [Insert Date] with real date and user profile
     from datetime import datetime
     today_str = datetime.now().strftime("%B %d, %Y")
-    content = re.sub(r'\[(?:Insert|Your)?\s*(?:Name|Author|Inspector Name)[^\]]*\]', "Rashmi", content, flags=re.IGNORECASE)
-    content = re.sub(r'\[(?:Insert|Your)?\s*(?:Title)[^\]]*\]', "Lead Operations Engineer", content, flags=re.IGNORECASE)
+    content = re.sub(r'\[(?:Insert|Your)?\s*(?:Name|Author|Inspector Name)[^\]]*\]', author_name, content, flags=re.IGNORECASE)
+    content = re.sub(r'\[(?:Insert|Your)?\s*(?:Title)[^\]]*\]', author_title, content, flags=re.IGNORECASE)
     content = re.sub(r'\[(?:Insert|Your)?\s*(?:Current\s+Date|Date|Today)[^\]]*\]', today_str, content, flags=re.IGNORECASE)
     content = re.sub(r'\[(?:Insert|Your)?\s*(?:Time)[^\]]*\]', "09:00 AM", content, flags=re.IGNORECASE)
-    content = re.sub(r'```[a-zA-Z0-9_\-\+]*', '', content)
-    content = content.replace('```', '')
-
 
     # Document Header / Title
-
     title_p = doc.add_paragraph()
     title_run = title_p.add_run(title.strip())
     title_run.font.name = "Arial"
@@ -40,40 +37,59 @@ def generate_docx_document(
     title_run.font.color.rgb = RGBColor(0x1F, 0x29, 0x37) # Dark slate
     title_p.paragraph_format.space_after = Pt(12)
 
-    # Parse lines into styled headings, metadata fields, bullets, and body paragraphs
+    # Parse lines into styled headings, code blocks, metadata fields, bullets, and body paragraphs
     lines = content.strip().split("\n")
+    in_code_block = False
+
     for line in lines:
-        line_str = line.strip()
-        if not line_str:
+        line_str = line.rstrip()
+        
+        # Check code fence delimiter
+        if line_str.strip().startswith("```"):
+            in_code_block = not in_code_block
+            continue
+
+        if in_code_block:
+            p = doc.add_paragraph()
+            run = p.add_run(line_str)
+            run.font.name = "Consolas"
+            run.font.size = Pt(9.5)
+            run.font.color.rgb = RGBColor(0x1E, 0x29, 0x3B)
+            p.paragraph_format.space_after = Pt(1)
+            p.paragraph_format.space_before = Pt(0)
+            p.paragraph_format.left_indent = Inches(0.25)
+            continue
+
+        if not line_str.strip():
             continue
 
         # Heading 1 (# Heading)
-        if line_str.startswith("# "):
-            h_text = line_str[2:].strip()
+        if line_str.strip().startswith("# "):
+            h_text = line_str.strip()[2:].strip()
             h = doc.add_heading(h_text, level=1)
             h.style.font.name = "Arial"
             h.style.font.color.rgb = RGBColor(0xD9, 0x77, 0x06) # Amber theme accent
             continue
 
         # Heading 2 (## Heading)
-        if line_str.startswith("## "):
-            h_text = line_str[3:].strip()
+        if line_str.strip().startswith("## "):
+            h_text = line_str.strip()[3:].strip()
             h = doc.add_heading(h_text, level=2)
             h.style.font.name = "Arial"
             h.style.font.color.rgb = RGBColor(0x37, 0x41, 0x51)
             continue
 
         # Heading 3 (### Heading)
-        if line_str.startswith("### "):
-            h_text = line_str[4:].strip()
+        if line_str.strip().startswith("### "):
+            h_text = line_str.strip()[4:].strip()
             h = doc.add_heading(h_text, level=3)
             h.style.font.name = "Arial"
             continue
 
         # Key-Value metadata lines (e.g. **Subject:** ..., **To:** ..., **From:** ...)
-        if ":" in line_str and any(line_str.lower().startswith(kw) for kw in ["subject", "to", "from", "date", "memo", "re:"]):
+        if ":" in line_str and any(line_str.strip().lower().startswith(kw) for kw in ["subject", "to", "from", "date", "memo", "re:"]):
             p = doc.add_paragraph()
-            parts = line_str.split(":", 1)
+            parts = line_str.strip().split(":", 1)
             k_run = p.add_run(parts[0].replace("**", "").replace("*", "").strip() + ": ")
             k_run.font.bold = True
             k_run.font.size = Pt(11)
@@ -83,7 +99,7 @@ def generate_docx_document(
             continue
 
         # Bullet List Items (* or - or numbered)
-        bullet_match = re.match(r"^[\*\-\•\d+\.]\s+(.*)", line_str)
+        bullet_match = re.match(r"^[\*\-\•\d+\.]\s+(.*)", line_str.strip())
         if bullet_match:
             item_text = bullet_match.group(1).replace("**", "").replace("*", "").strip()
             p = doc.add_paragraph(style='List Bullet')
@@ -95,7 +111,7 @@ def generate_docx_document(
 
         # Standard Body Paragraph
         p = doc.add_paragraph()
-        clean_text = line_str.replace("**", "").replace("*", "")
+        clean_text = line_str.strip().replace("**", "").replace("*", "")
         run = p.add_run(clean_text)
         run.font.name = "Calibri"
         run.font.size = Pt(11)

@@ -61,7 +61,7 @@ class OllamaClient:
         """Check if local/remote Ollama server is running and get available models (cached 60s)."""
         import time
         now = time.time()
-        if self._cached_health and (now - self._cached_health_time) < 60.0:
+        if self._cached_health and (now - self._cached_health_time) < 5.0:
             return self._cached_health
 
         try:

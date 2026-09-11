@@ -96,7 +96,7 @@ class ModelRegistry:
 class DynamicModelRouter:
     """
     Analyzes incoming user intent, query domain, active documents, and runtime Ollama model availability
-    to dynamically route prompts to the optimal specialized local model.
+    to dynamically route prompts to the optimal specialized local model using LLM classification with heuristic fallback.
     """
     def __init__(self, registry: Optional[ModelRegistry] = None):
         self.registry = registry or ModelRegistry()
@@ -113,7 +113,12 @@ class DynamicModelRouter:
         if has_images or any(kw in prompt_clean for kw in ["image", "photo", "diagram", "schematic", "ocr", "chart", "blueprint"]):
             return ModelCapability.VISION_OCR, "Prompt contains vision/diagram OCR inspection criteria"
 
-        # 2. Code execution & software engineering
+        # 2. Document synthesis, formal reporting, Word (.docx) or code specification documentation
+        doc_keywords = ["doc", "document", "docx", "memo", "sop", "spec", "specification", "manual", "procedure", "report", "draft", "save as doc", "save the output", "save in doc"]
+        if (active_document_ids and len(active_document_ids) > 0) or any(kw in prompt_clean for kw in doc_keywords):
+            return ModelCapability.DOCUMENT_CREATION, "Prompt requests formal document creation, technical specification, or SOP synthesis"
+
+        # 3. Code execution & software engineering
         code_keywords = [
             "python", "script", "code", "function", "class", "algorithm",
             "plot", "matplotlib", "numpy", "pandas", "refactor", "debug",
@@ -122,7 +127,7 @@ class DynamicModelRouter:
         if any(kw in prompt_clean for kw in code_keywords):
             return ModelCapability.CODING, "Prompt requests code generation, mathematical simulation or sandbox execution"
 
-        # 3. Mathematical reasoning & physics formulas
+        # 4. Mathematical reasoning & physics formulas
         math_keywords = [
             "calculate", "equation", "formula", "mawp", "derivation", "thermal efficiency",
             "degradation factor", "integral", "derivative", "probability", "matrix", "algebra"
@@ -130,13 +135,71 @@ class DynamicModelRouter:
         if any(kw in prompt_clean for kw in math_keywords):
             return ModelCapability.MATH_REASONING, "Prompt requires rigorous mathematical derivation and formula calculations"
 
-        # 4. Document synthesis & RAG SOP query
-        doc_keywords = ["sop", "spec", "boiler", "mawp", "asme", "document", "manual", "procedure", "memo", "report", "draft", "executive summary"]
-        if (active_document_ids and len(active_document_ids) > 0) or any(kw in prompt_clean for kw in doc_keywords):
-            return ModelCapability.DOCUMENT_CREATION, "Prompt references technical documentation, SOPs, or formal memo creation"
-
         # 5. General dialogue / greeting fallback
         return ModelCapability.GENERAL_CHAT, "General conversational prompt routed to standard dialogue model"
+
+    async def classify_capability_llm(
+        self,
+        prompt: str,
+        active_document_ids: Optional[List[str]] = None,
+        has_images: bool = False
+    ) -> tuple[ModelCapability, str]:
+        """
+        Uses a lightweight local LLM inference call to dynamically classify user intent into specialized capabilities.
+        Falls back to rule-based classification if offline or unparseable.
+        """
+        if has_images:
+            return ModelCapability.VISION_OCR, "Vision input detected for multimodal inspection"
+
+        try:
+            import json
+            import re
+            import asyncio
+            from backend.app.services.ollama_client import ollama_client
+
+            system_prompt = (
+                "You are an AI Intent Router for an Engineering Workbench. "
+                "Classify the user prompt into exactly ONE of the following capability categories:\n"
+                "- document_creation: The user wants to create, draft, generate, or compile a document, formal report, Word (.docx) file, memo, SOP, or technical code specification (even if code/explanation is included in the document).\n"
+                "- coding: The user wants pure executable code, script, bug fix, algorithm implementation, or refactoring in a programming language.\n"
+                "- math_reasoning: The user wants mathematical derivations, calculations, physics formulas, or equation solving.\n"
+                "- vision_ocr: The user wants image, diagram, blueprint, or OCR analysis.\n"
+                "- general_chat: General conversation, greeting, conceptual explanation, or general knowledge inquiry.\n\n"
+                "Respond ONLY with a valid JSON object in this exact format: {\"capability\": \"<category>\", \"reason\": \"<brief 1-sentence reason>\"}"
+            )
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Active Documents: {active_document_ids or 'None'}\nUser Prompt: {prompt}"}
+            ]
+
+            # Fast classification with 5s timeout
+            llm_text = await asyncio.wait_for(
+                ollama_client.generate_chat(messages, temperature=0.0),
+                timeout=5.0
+            )
+
+            # Parse JSON from response
+            json_match = re.search(r"\{[\s\S]*?\}", llm_text)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+                cap_str = str(parsed.get("capability", "")).lower().strip()
+                reason_str = str(parsed.get("reason", "")).strip()
+
+                cap_map = {
+                    "document_creation": ModelCapability.DOCUMENT_CREATION,
+                    "coding": ModelCapability.CODING,
+                    "math_reasoning": ModelCapability.MATH_REASONING,
+                    "vision_ocr": ModelCapability.VISION_OCR,
+                    "general_chat": ModelCapability.GENERAL_CHAT
+                }
+                if cap_str in cap_map:
+                    return cap_map[cap_str], f"LLM Router: {reason_str or 'Autonomous intent classification'}"
+
+        except Exception as e:
+            logger.debug(f"LLM routing classification failed/timed out ({e}), falling back to heuristic classification.")
+
+        return self.classify_capability(prompt, active_document_ids, has_images)
 
     def route_query(
         self,
@@ -146,13 +209,28 @@ class DynamicModelRouter:
         available_models: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         capability, reason = self.classify_capability(prompt, active_document_ids, has_images)
-        profile = self.registry.get_profile(capability)
+        return self._build_routing_result(capability, reason, available_models)
 
+    async def route_query_async(
+        self,
+        prompt: str,
+        active_document_ids: Optional[List[str]] = None,
+        has_images: bool = False,
+        available_models: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        capability, reason = await self.classify_capability_llm(prompt, active_document_ids, has_images)
+        return self._build_routing_result(capability, reason, available_models)
+
+    def _build_routing_result(
+        self,
+        capability: ModelCapability,
+        reason: str,
+        available_models: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        profile = self.registry.get_profile(capability)
         target_model = profile.name
         fallback_chain = [target_model]
 
-        # On-premise air-gap fallback: If available_models list is supplied (from Ollama health check)
-        # and the primary specialized model is not downloaded, cascade to default reasoning model.
         if available_models and len(available_models) > 0:
             is_available = any(target_model.lower() in m.lower() or m.lower() in target_model.lower() for m in available_models)
             if not is_available:

@@ -1,9 +1,10 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ArtifactData, ArtifactVersion } from '../../lib/types'
 import { AmberUnderline } from '../layout/AmberUnderline'
 import { api } from '../../lib/api'
 import { useWorkbench } from '../../lib/WorkbenchContext'
+import { useShikiHighlighting, detectInteractiveInputs, type ShikiToken } from '../chat/SyntaxHighlighter'
 
 export interface ArtifactPanelProps {
   artifact: ArtifactData
@@ -18,7 +19,7 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
   onClose,
   className = '',
 }) => {
-  const { sendMessage } = useWorkbench()
+  const { sendMessage, updateArtifactTerminal } = useWorkbench()
 
   // Only HTML or visual web previews default to preview; all code files default to code view
   const isVisualComponent =
@@ -32,17 +33,113 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
   const [diffViewVersion, setDiffViewVersion] = useState<ArtifactVersion | null>(null)
   const [isDualSplit, setIsDualSplit] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [exported, setExported] = useState(false)
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const [compilingFormat, setCompilingFormat] = useState<string | null>(null)
+  const [exportSuccessFormat, setExportSuccessFormat] = useState<string | null>(null)
   const [showExplainModal, setShowExplainModal] = useState(false)
   const [isAskingChat, setIsAskingChat] = useState(false)
   const [isRunningSandbox, setIsRunningSandbox] = useState(false)
   const [sandboxOutput, setSandboxOutput] = useState<string | null>(null)
   const [sandboxMeta, setSandboxMeta] = useState<{ exitCode: number; durationMs: number } | null>(null)
+  const [inputValues, setInputValues] = useState<Record<string, string>>({})
+
+  // Keep sandbox state in sync with artifact.terminalOutput if updated externally from chat code blocks
+  useEffect(() => {
+    if (artifact.terminalOutput !== undefined) {
+      setSandboxOutput(null)
+      setSandboxMeta(null)
+    }
+  }, [artifact.terminalOutput, artifact.terminalExitCode, artifact.terminalDurationMs])
 
   const currentFileContent =
     artifact.files.find((f) => f.name === selectedFile)?.content ||
     artifact.files[0]?.content ||
     ''
+
+  const activeFileObj = artifact.files.find((f) => f.name === selectedFile) || artifact.files[0]
+  const currentFileLang = (
+    activeFileObj?.language ||
+    (selectedFile?.endsWith('.c')
+      ? 'c'
+      : selectedFile?.endsWith('.cpp') || selectedFile?.endsWith('.cc')
+      ? 'cpp'
+      : selectedFile?.endsWith('.py')
+      ? 'python'
+      : selectedFile?.endsWith('.ts')
+      ? 'typescript'
+      : selectedFile?.endsWith('.tsx')
+      ? 'tsx'
+      : selectedFile?.endsWith('.js')
+      ? 'javascript'
+      : selectedFile?.endsWith('.jsx')
+      ? 'jsx'
+      : selectedFile?.endsWith('.java')
+      ? 'java'
+      : selectedFile?.endsWith('.rs')
+      ? 'rust'
+      : selectedFile?.endsWith('.go')
+      ? 'go'
+      : selectedFile?.endsWith('.sql')
+      ? 'sql'
+      : selectedFile?.endsWith('.html')
+      ? 'html'
+      : selectedFile?.endsWith('.css')
+      ? 'css'
+      : selectedFile?.endsWith('.json')
+      ? 'json'
+      : selectedFile?.endsWith('.sh') || selectedFile?.endsWith('.bash')
+      ? 'bash'
+      : 'c')
+  ).toLowerCase()
+
+  const displayRuntime = (activeFileObj?.language?.toUpperCase() || (artifact.badge ? artifact.badge.split('·')[0].trim() : '') || currentFileLang.toUpperCase() || 'NATIVE')
+
+  // Shiki TextMate multi-color syntax highlighting
+  const { tokenLines } = useShikiHighlighting(currentFileContent, currentFileLang)
+  const detectedPrompts = detectInteractiveInputs(currentFileContent, currentFileLang)
+
+  const formatInteractiveOutput = (stdout: string, inputUsed?: string): string => {
+    if (!inputUsed || !stdout) return stdout
+    const inputs = inputUsed.split('\n')
+    const promptRegex = /([^\n]*?[:\?]\s*)/g
+    let match: RegExpExecArray | null
+    let inputIdx = 0
+    let result = ''
+
+    const matches: Array<{ text: string; index: number; end: number }> = []
+    while ((match = promptRegex.exec(stdout)) !== null) {
+      if (match[0].trim().length > 0) {
+        matches.push({
+          text: match[0],
+          index: match.index,
+          end: match.index + match[0].length,
+        })
+      }
+    }
+
+    if (matches.length > 0 && inputs.length > 0) {
+      let currentPos = 0
+      for (let i = 0; i < matches.length && inputIdx < inputs.length; i++) {
+        const m = matches[i]
+        result += stdout.substring(currentPos, m.end)
+        const userVal = inputs[inputIdx] !== undefined ? inputs[inputIdx] : ''
+        const nextChar = stdout[m.end]
+        if (nextChar === '\n') {
+          result += userVal
+        } else {
+          result += `${userVal}\n`
+        }
+        currentPos = m.end
+        inputIdx++
+      }
+      result += stdout.substring(currentPos)
+      return result
+    }
+
+    return stdout
+  }
+
+  const promptCommand = currentFileLang === 'c' ? '$ gcc main.c -o main.out && ./main.out' : currentFileLang === 'cpp' ? '$ g++ main.cpp -o main.out && ./main.out' : currentFileLang === 'java' ? '$ java Main' : currentFileLang === 'javascript' || currentFileLang === 'typescript' ? '$ node script.js' : '$ python3 script.py'
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(currentFileContent)
@@ -62,21 +159,67 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-      setExported(true)
-      setTimeout(() => setExported(false), 2000)
+      setExportSuccessFormat('SAVED')
+      setTimeout(() => setExportSuccessFormat(null), 2000)
     } catch (err) {
       console.error('Failed to export file:', err)
     }
   }
 
+  const handleCompileAndExport = async (format: 'pdf' | 'docx' | 'latex' | 'html' | 'raw' | 'zip') => {
+    if (format === 'raw') {
+      handleExport()
+      setShowExportMenu(false)
+      return
+    }
+
+    if (format === 'zip') {
+      try {
+        setCompilingFormat('zip')
+        await api.downloadSessionBundle(artifact.id || 'current_session')
+        setExportSuccessFormat('ZIP')
+        setTimeout(() => setExportSuccessFormat(null), 2500)
+      } catch (err) {
+        console.error('Failed to export session bundle:', err)
+      } finally {
+        setCompilingFormat(null)
+        setShowExportMenu(false)
+      }
+      return
+    }
+
+    try {
+      setCompilingFormat(format)
+      const cleanTitle = (artifact.title || 'Technical_Specification').replace(/\.[^/.]+$/, '')
+      const res = await api.compileDocument({
+        title: cleanTitle,
+        content: currentFileContent,
+        format,
+      })
+      if (res.download_url) {
+        const a = document.createElement('a')
+        a.href = res.download_url
+        a.download = res.filename || `${cleanTitle}.${format === 'latex' ? 'tex' : format}`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+      }
+      setExportSuccessFormat(format.toUpperCase())
+      setTimeout(() => setExportSuccessFormat(null), 2500)
+    } catch (err) {
+      console.error(`Failed to compile ${format}:`, err)
+    } finally {
+      setCompilingFormat(null)
+      setShowExportMenu(false)
+    }
+  }
+
+
   const handleAskAiExplain = async () => {
     setIsAskingChat(true)
     try {
-      const fileObj = artifact.files.find((f) => f.name === selectedFile) || artifact.files[0]
-      const lang = fileObj?.language || (artifact.title.endsWith('.py') ? 'python' : artifact.title.endsWith('.cpp') ? 'cpp' : artifact.title.endsWith('.java') ? 'java' : 'text')
       const fileName = selectedFile || artifact.title || 'source_file'
-
-      const prompt = `Please provide a comprehensive code walkthrough and algorithmic breakdown of the following \`${fileName}\` code:\n\n\`\`\`${lang}\n${currentFileContent}\n\`\`\`\n\nExplain:\n1. Algorithmic logic and execution flow\n2. Key data structures used\n3. Time Complexity and Space Complexity\n4. Invariant safety guarantees and edge case handling`
+      const prompt = `Please provide a comprehensive code walkthrough and algorithmic breakdown of the following \`${fileName}\` code:\n\n\`\`\`${currentFileLang}\n${currentFileContent}\n\`\`\`\n\nExplain:\n1. Algorithmic logic and execution flow\n2. Key data structures used\n3. Time Complexity and Space Complexity\n4. Invariant safety guarantees and edge case handling\n\n(Important: If quoting or presenting code, ALWAYS keep the complete program with all function declarations like \`def ...\` intact)`
 
       await sendMessage(prompt)
       setShowExplainModal(false)
@@ -87,22 +230,33 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
     }
   }
 
+  const effectiveTerminalOutput = sandboxOutput ?? artifact.terminalOutput ?? ''
+  const effectiveExitCode = sandboxMeta?.exitCode ?? artifact.terminalExitCode ?? 0
+  const effectiveDurationMs = sandboxMeta?.durationMs ?? artifact.terminalDurationMs ?? 0
+  const effectiveCommand = artifact.terminalCommand || promptCommand
+
   const handleRunInSandbox = async () => {
     setIsRunningSandbox(true)
+    const stdinPayload = detectedPrompts.length > 0
+      ? detectedPrompts.map((p) => inputValues[p.id] || p.defaultValue || '1').join('\n') + '\n'
+      : ''
     try {
-      const fileObj = artifact.files.find((f) => f.name === selectedFile) || artifact.files[0]
-      const lang = fileObj?.language || (artifact.title.endsWith('.py') ? 'python' : artifact.title.endsWith('.ts') ? 'typescript' : 'python')
-      const res = await api.executeSandbox(currentFileContent, lang, 10)
+      const res = await api.executeSandbox(currentFileContent, currentFileLang, 10, stdinPayload)
       let outputText = ''
-      if (res.stdout) outputText += res.stdout
+      if (res.stdout) {
+        outputText += formatInteractiveOutput(res.stdout, stdinPayload)
+      }
       if (res.stderr) outputText += (outputText ? '\n' : '') + res.stderr
       if (!outputText) outputText = '[Process executed successfully with 0 exit code]'
       setSandboxOutput(outputText)
       setSandboxMeta({ exitCode: res.exit_code, durationMs: res.execution_time_ms })
+      updateArtifactTerminal(outputText, res.exit_code, res.execution_time_ms, promptCommand)
       setActiveTab('terminal')
     } catch (err: any) {
-      setSandboxOutput(`Execution error: ${err.message || 'Sandbox connection failed'}`)
+      const errText = `Execution error: ${err.message || 'Sandbox connection failed'}`
+      setSandboxOutput(errText)
       setSandboxMeta({ exitCode: 1, durationMs: 0 })
+      updateArtifactTerminal(errText, 1, 0, promptCommand)
       setActiveTab('terminal')
     } finally {
       setIsRunningSandbox(false)
@@ -263,15 +417,132 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
 
             <span className="text-border hidden sm:inline">·</span>
 
-            {/* Export */}
-            <button
-              type="button"
-              onClick={handleExport}
-              className="text-text-muted hover:text-text-primary transition-colors cursor-pointer px-1 py-1 text-[11px] shrink-0"
-              title="Download and save source file"
-            >
-              {exported ? <span className="text-green-400 font-semibold">Saved ✓</span> : 'Export'}
-            </button>
+            {/* Multi-Format Export Dropdown */}
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowExportMenu((prev) => !prev)}
+                className={`flex items-center gap-1 rounded-[3px] border px-2 py-1 text-[11px] font-mono transition-all cursor-pointer ${
+                  showExportMenu || compilingFormat || exportSuccessFormat
+                    ? 'border-accent-primary bg-accent-primary/20 text-accent-primary font-semibold shadow-xs'
+                    : 'border-border bg-surface-2/60 text-text-muted hover:text-text-primary hover:border-text-muted/60'
+                }`}
+                title="Export in multiple formats (.docx, .pdf, .latex, .html, .zip)"
+              >
+                {compilingFormat ? (
+                  <>
+                    <svg className="animate-spin h-3 w-3 text-accent-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>{compilingFormat.toUpperCase()}...</span>
+                  </>
+                ) : exportSuccessFormat ? (
+                  <span className="text-green-400 font-semibold">{exportSuccessFormat} ✓</span>
+                ) : (
+                  <>
+                    <span>Export</span>
+                    <span className="text-[9px] opacity-70">▾</span>
+                  </>
+                )}
+              </button>
+
+              <AnimatePresence>
+                {showExportMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: 4 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 4 }}
+                    transition={{ duration: 0.12, ease: 'easeOut' }}
+                    className="absolute right-0 top-full mt-1.5 z-50 w-56 rounded-[4px] border border-border bg-[#14100D] p-1.5 shadow-2xl font-mono text-xs text-text-primary select-none"
+                  >
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-text-muted/80 font-bold border-b border-border/60 mb-1">
+                      Compile &amp; Export Formats
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCompileAndExport('pdf')}
+                      disabled={!!compilingFormat}
+                      className="w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[3px] hover:bg-surface-2 transition-colors cursor-pointer group disabled:opacity-50"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-accent-primary font-bold">[ .PDF ]</span>
+                        <span className="text-[11px] text-text-body">A4 Document</span>
+                      </div>
+                      <span className="text-[9px] text-text-muted group-hover:text-accent-primary">Print PDF</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCompileAndExport('docx')}
+                      disabled={!!compilingFormat}
+                      className="w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[3px] hover:bg-surface-2 transition-colors cursor-pointer group disabled:opacity-50"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-blue-400 font-bold">[ .DOCX ]</span>
+                        <span className="text-[11px] text-text-body">MS Word Doc</span>
+                      </div>
+                      <span className="text-[9px] text-text-muted group-hover:text-blue-400">Office</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCompileAndExport('latex')}
+                      disabled={!!compilingFormat}
+                      className="w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[3px] hover:bg-surface-2 transition-colors cursor-pointer group disabled:opacity-50"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-purple-400 font-bold">[ .TEX ]</span>
+                        <span className="text-[11px] text-text-body">LaTeX Source</span>
+                      </div>
+                      <span className="text-[9px] text-text-muted group-hover:text-purple-400">Paper</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCompileAndExport('html')}
+                      disabled={!!compilingFormat}
+                      className="w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[3px] hover:bg-surface-2 transition-colors cursor-pointer group disabled:opacity-50"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-amber-400 font-bold">[ .HTML ]</span>
+                        <span className="text-[11px] text-text-body">Standalone Web</span>
+                      </div>
+                      <span className="text-[9px] text-text-muted group-hover:text-amber-400">Archive</span>
+                    </button>
+
+                    <div className="border-t border-border/60 my-1" />
+
+                    <button
+                      type="button"
+                      onClick={() => handleCompileAndExport('raw')}
+                      className="w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[3px] hover:bg-surface-2 transition-colors cursor-pointer group"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-text-muted font-bold">[ RAW ]</span>
+                        <span className="text-[11px] text-text-body">Source Code</span>
+                      </div>
+                      <span className="text-[9px] text-text-muted">Plain File</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCompileAndExport('zip')}
+                      disabled={!!compilingFormat}
+                      className="w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[3px] hover:bg-surface-2 transition-colors cursor-pointer group disabled:opacity-50 bg-accent-primary/5 mt-0.5 border border-accent-primary/20"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-green-400 font-bold">📦</span>
+                        <span className="text-[11px] text-text-primary font-semibold">Session Bundle</span>
+                      </div>
+                      <span className="text-[9px] text-green-400 font-bold">.ZIP</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
 
             <div className="h-4 w-[1px] bg-border mx-0.5 shrink-0" />
 
@@ -415,24 +686,26 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
                   ))}
                 </pre>
               </div>
-
               {/* Right Column: Live Terminal Output */}
               <div className="rounded-[4px] border border-border bg-surface-1 p-4 font-mono text-xs text-text-body flex flex-col space-y-2 max-h-[600px]">
                 <div className="flex items-center justify-between pb-2 border-b border-border text-text-muted text-[11px] shrink-0">
                   <div className="flex items-center gap-2">
                     <span className={`h-2 w-2 rounded-full ${isRunningSandbox ? 'bg-amber-400 animate-ping' : 'bg-green-400'}`} />
                     <span className="text-text-primary font-semibold">
-                      {sandboxOutput ? 'ENCLAVE SUBPROCESS RUNNER' : 'SUBPROCESS ENCLAVE'}
+                      {effectiveTerminalOutput ? 'ENCLAVE SUBPROCESS RUNNER' : 'SUBPROCESS ENCLAVE'}
                     </span>
                   </div>
-                  {sandboxMeta && (
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${sandboxMeta.exitCode === 0 ? 'bg-green-500/10 text-green-400 border border-green-500/30' : 'bg-red-500/10 text-[#E54D2E] border border-red-500/30'}`}>
-                      {sandboxMeta.exitCode === 0 ? '✓ EXIT 0' : `✕ EXIT ${sandboxMeta.exitCode}`} · {sandboxMeta.durationMs}ms
+                  {(sandboxMeta || artifact.terminalExitCode !== undefined) && (
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${effectiveExitCode === 0 ? 'bg-green-500/10 text-green-400 border border-green-500/30' : 'bg-red-500/10 text-[#E54D2E] border border-red-500/30'}`}>
+                      {effectiveExitCode === 0 ? '✓ EXIT 0' : `✕ EXIT ${effectiveExitCode}`} · {effectiveDurationMs}ms
                     </span>
                   )}
                 </div>
-                <div className="flex-1 bg-[#0E0D0B] p-3 rounded border border-border/80 overflow-y-auto text-[11px] whitespace-pre-wrap text-text-primary leading-relaxed">
-                  {sandboxOutput || artifact.terminalOutput || 'Click "Run" above to execute inside the isolated sandbox.'}
+                <div className="text-accent-primary/90 font-mono text-[11px] pb-1 border-b border-border/20 font-medium">
+                  {effectiveCommand}
+                </div>
+                <div className="flex-1 bg-[#0E0D0B] p-3 rounded border border-border/80 overflow-y-auto text-[11px] whitespace-pre-wrap text-emerald-300 leading-relaxed">
+                  {effectiveTerminalOutput || 'Click "Run" above to execute inside the isolated sandbox.'}
                 </div>
               </div>
             </motion.div>
@@ -472,42 +745,66 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
                   </div>
                 </div>
               ) : (
-                /* =========================================================================
-                   PREVIEW 4: SOVEREIGN SUBPROCESS ENCLAVE RUNNER
-                   ========================================================================= */
-                <div className="space-y-4 font-body">
-                  <div className="rounded-[4px] border border-border bg-surface-1 p-5 shadow-sm space-y-4">
-                    <div className="flex items-center justify-between border-b border-border/60 pb-3">
+                /* Standalone Native Application Runner & Terminal */
+                <div className="space-y-4">
+                  <div className="rounded-[4px] border border-border bg-surface-1 p-4 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
                       <div>
                         <h3 className="font-display text-sm font-semibold text-text-primary">
-                          {artifact.title} · Sovereign Subprocess Enclave
+                          {selectedFile || artifact.title} — Application Sandbox
                         </h3>
                         <p className="font-body text-xs text-text-muted mt-0.5">
-                          Runtime: <code className="text-accent-primary font-mono">{artifact.badge}</code> · Memory: 512MB · Air-Gapped
+                          Direct stdin stream compilation and native execution via isolated subprocess
                         </p>
                       </div>
                       <span className="font-mono text-[10px] text-green-400 bg-surface-2 px-2 py-0.5 rounded border border-green-500/40 font-semibold">
-                        ● READY TO RUN
+                        NATIVE RUNNER
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="rounded-[4px] border border-border bg-surface-2/70 p-3">
-                        <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">Target Runtime</span>
-                        <div className="font-mono text-base font-bold text-text-primary mt-0.5 truncate">{artifact.badge.split('·')[0].trim()}</div>
-                        <span className="font-mono text-[10px] text-text-muted">Isolated Execution</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 font-mono text-xs pt-1">
+                      <div className="rounded-[3px] border border-border bg-surface-2/60 p-2.5">
+                        <span className="text-[10px] text-text-muted uppercase tracking-wider block">Runtime</span>
+                        <span className="text-text-primary font-bold">{displayRuntime}</span>
                       </div>
-                      <div className="rounded-[4px] border border-accent-primary/40 bg-accent-primary/5 p-3">
-                        <span className="font-mono text-[10px] uppercase tracking-wider text-accent-primary font-semibold">Isolation</span>
-                        <div className="font-mono text-base font-bold text-accent-primary mt-0.5">Subprocess Enclave</div>
-                        <span className="font-mono text-[10px] text-accent-primary">Zero external egress</span>
+                      <div className="rounded-[3px] border border-border bg-surface-2/60 p-2.5">
+                        <span className="text-[10px] text-text-muted uppercase tracking-wider block">Security</span>
+                        <span className="text-green-400 font-bold">Subprocess Enclave</span>
                       </div>
-                      <div className="rounded-[4px] border border-border bg-surface-2/70 p-3">
-                        <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">Watchdog Limit</span>
-                        <div className="font-mono text-base font-bold text-text-primary mt-0.5">10,000 ms</div>
-                        <span className="font-mono text-[10px] text-text-muted">Timeout protection</span>
+                      <div className="rounded-[3px] border border-border bg-surface-2/60 p-2.5 col-span-2 sm:col-span-1">
+                        <span className="text-[10px] text-text-muted uppercase tracking-wider block">Timeout</span>
+                        <span className="text-accent-primary font-bold">10,000ms Watchdog</span>
                       </div>
                     </div>
+
+                    {detectedPrompts.length > 0 && (
+                      <div className="rounded-[4px] border border-border/80 bg-[#17130F] p-3.5 space-y-2.5">
+                        <span className="font-mono text-[11px] text-accent-primary font-semibold uppercase tracking-wider block">
+                          Interactive Program Inputs ({detectedPrompts.length})
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {detectedPrompts.map((prompt, idx) => (
+                            <div key={prompt.id} className="space-y-1">
+                              <label className="block text-[11px] text-text-muted font-mono font-medium truncate">
+                                {idx + 1}. {prompt.label}
+                              </label>
+                              <input
+                                type="text"
+                                value={inputValues[prompt.id] || ''}
+                                onChange={(e) =>
+                                  setInputValues((prev) => ({
+                                    ...prev,
+                                    [prompt.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder={prompt.placeholder || `Enter value for: ${prompt.label}`}
+                                className="w-full rounded-[3px] border border-border bg-surface-2/80 px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-placeholder focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary font-mono"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="pt-2">
                       <button
@@ -527,24 +824,27 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
                         ) : (
                           <>
                             <span>▶</span>
-                            <span>Run {artifact.title} in Isolated Sandbox</span>
+                            <span>Run {selectedFile || artifact.title} in Isolated Sandbox</span>
                           </>
                         )}
                       </button>
                     </div>
                   </div>
 
-                  {sandboxOutput && (
+                  {(effectiveTerminalOutput || artifact.terminalOutput) && (
                     <div className="rounded-[4px] border border-border bg-[#0E0D0B] p-4 font-mono text-xs leading-relaxed space-y-2">
                       <div className="flex items-center justify-between border-b border-border/60 pb-2 text-[11px] text-text-muted">
                         <span className="text-text-primary font-semibold">Live Execution Output</span>
-                        {sandboxMeta && (
-                          <span className={sandboxMeta.exitCode === 0 ? 'text-green-400 font-bold' : 'text-[#E54D2E] font-bold'}>
-                            {sandboxMeta.exitCode === 0 ? '✓ EXIT 0' : `✕ EXIT ${sandboxMeta.exitCode}`} · {sandboxMeta.durationMs}ms
+                        {(sandboxMeta || artifact.terminalExitCode !== undefined) && (
+                          <span className={effectiveExitCode === 0 ? 'text-green-400 font-bold' : 'text-[#E54D2E] font-bold'}>
+                            {effectiveExitCode === 0 ? '✓ EXIT 0' : `✕ EXIT ${effectiveExitCode}`} · {effectiveDurationMs}ms
                           </span>
                         )}
                       </div>
-                      <pre className="text-text-primary whitespace-pre-wrap">{sandboxOutput}</pre>
+                      <div className="text-text-muted/60 text-[11px] pb-1 border-b border-border/20">
+                        <span className="text-accent-primary/90">{effectiveCommand}</span>
+                      </div>
+                      <pre className="text-emerald-300 font-mono whitespace-pre-wrap">{effectiveTerminalOutput}</pre>
                     </div>
                   )}
                 </div>
@@ -552,22 +852,35 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
             </motion.div>
 
           ) : activeTab === 'code' ? (
-            /* Syntax Code View */
+            /* Shiki Multi-Color Syntax Code View */
             <motion.div
               key="code"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 8 }}
               transition={{ duration: 0.15, ease: 'easeOut' }}
-              className="rounded-[4px] border border-border bg-surface-1 p-4 overflow-x-auto font-mono text-xs leading-relaxed"
+              className="rounded-[4px] border border-border bg-[#120F0D] p-4 overflow-x-auto font-mono text-xs leading-[1.65]"
             >
-              <pre className="text-text-body">
-                {currentFileContent.split('\n').map((line, i) => (
-                  <div key={i} className="flex">
-                    <span className="w-8 text-text-muted/40 select-none shrink-0 text-right pr-3">
+              <pre className="text-text-primary font-mono">
+                {(tokenLines || (currentFileContent.split('\n').map((l): ShikiToken[] => [{ content: l || ' ' }]))).map((lineTokens, i) => (
+                  <div key={i} className="flex hover:bg-white/[0.03] rounded-[2px] transition-colors">
+                    <span className="w-8 text-text-muted/40 select-none shrink-0 text-right pr-3.5 text-[11px] font-mono">
                       {i + 1}
                     </span>
-                    <span className="text-text-primary">{line}</span>
+                    <span className="flex-1 font-mono">
+                      {lineTokens.map((token, tIdx) => (
+                        <span
+                          key={tIdx}
+                          style={{
+                            color: token.color,
+                            fontStyle: token.fontStyle === 1 ? 'italic' : undefined,
+                            fontWeight: token.fontStyle === 2 ? 600 : undefined,
+                          }}
+                        >
+                          {token.content}
+                        </span>
+                      ))}
+                    </span>
                   </div>
                 ))}
               </pre>
@@ -580,32 +893,74 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 8 }}
               transition={{ duration: 0.15, ease: 'easeOut' }}
-              className="rounded-[4px] border border-border bg-surface-1 p-4 font-mono text-xs text-text-body whitespace-pre-wrap leading-relaxed space-y-3"
+              className="rounded-[4px] border border-border bg-[#0E0D0B] p-4 font-mono text-xs text-text-body whitespace-pre-wrap leading-relaxed space-y-3"
             >
+              {detectedPrompts.length > 0 && (
+                <div className="rounded-[4px] border border-border/80 bg-[#17130F] p-3 space-y-2 mb-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-[11px] text-accent-primary font-semibold uppercase tracking-wider block">
+                      Program Standard Inputs ({detectedPrompts.length})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleRunInSandbox}
+                      disabled={isRunningSandbox}
+                      className="px-2.5 py-1 rounded bg-accent-primary text-background font-mono text-[10px] font-bold hover:bg-accent-primary/90 transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {isRunningSandbox ? 'Running...' : 'Submit & Execute'}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                    {detectedPrompts.map((prompt, idx) => (
+                      <div key={prompt.id} className="space-y-1">
+                        <label className="block text-[10px] text-text-muted font-mono truncate">
+                          {idx + 1}. {prompt.label}
+                        </label>
+                        <input
+                          type="text"
+                          value={inputValues[prompt.id] || ''}
+                          onChange={(e) =>
+                            setInputValues((prev) => ({
+                              ...prev,
+                              [prompt.id]: e.target.value,
+                            }))
+                          }
+                          placeholder={prompt.placeholder || `Value for: ${prompt.label}`}
+                          className="w-full rounded-[3px] border border-border bg-surface-2/80 px-2 py-1 text-[11px] text-text-primary placeholder:text-text-placeholder focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary font-mono"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between pb-2.5 border-b border-border text-text-muted text-[11px]">
                 <div className="flex items-center gap-2">
                   <span className={`h-2 w-2 rounded-full ${isRunningSandbox ? 'bg-amber-400 animate-ping' : 'bg-green-400'}`} />
                   <span className="text-text-primary font-semibold">
-                    {sandboxOutput ? 'ENCLAVE SUBPROCESS RUNNER' : 'LOCAL RUNNER (NODE 24 / VITE)'}
+                    {effectiveTerminalOutput ? 'ENCLAVE SUBPROCESS RUNNER' : 'LOCAL RUNNER (SANDBOX)'}
                   </span>
                 </div>
-                {sandboxMeta && (
+                {(sandboxMeta || artifact.terminalExitCode !== undefined) && (
                   <div className="flex items-center gap-2">
                     <span
                       className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                        sandboxMeta.exitCode === 0
+                        effectiveExitCode === 0
                           ? 'bg-green-500/10 text-green-400 border border-green-500/30'
                           : 'bg-red-500/10 text-[#E54D2E] border border-red-500/30'
                       }`}
                     >
-                      {sandboxMeta.exitCode === 0 ? '✓ EXIT 0' : `✕ EXIT ${sandboxMeta.exitCode}`}
+                      {effectiveExitCode === 0 ? '✓ PROCESS TERMINATED (EXIT 0)' : `✕ EXIT ${effectiveExitCode}`}
                     </span>
-                    <span className="text-accent-primary text-[10px]">{sandboxMeta.durationMs}ms</span>
+                    <span className="text-accent-primary text-[10px]">{effectiveDurationMs}ms</span>
                   </div>
                 )}
               </div>
-              <div className="text-text-primary font-mono text-[12px] whitespace-pre-wrap">
-                {sandboxOutput || artifact.terminalOutput || 'No output recorded yet. Click "Run Sandbox" above to execute.'}
+              <div className="text-accent-primary/90 font-mono text-[11px] pb-1 border-b border-border/20 font-medium">
+                {effectiveCommand}
+              </div>
+              <div className="text-emerald-300 font-mono text-[12px] whitespace-pre-wrap">
+                {effectiveTerminalOutput || 'No output recorded yet. Click "Run" above to execute.'}
               </div>
             </motion.div>
           )}

@@ -148,3 +148,108 @@ class SystemHealthResponse(BaseModel):
     network_isolation: NetworkIsolationTelemetry
     gpu_telemetry: GpuTelemetry
     loaded_models: List[LoadedModelInfo]
+    ollama_endpoint: str = ""
+    ollama_running: bool = False
+    available_models: List[str] = []
+
+# User Authentication Schemas
+class UserRegisterRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    full_name: str
+    role: Optional[str] = "AI Researcher"
+    avatar_letter: Optional[str] = None
+
+class UserLoginRequest(BaseModel):
+    username: str
+    password: str
+
+class UserProfileResponse(BaseModel):
+    id: str
+    username: str
+    email: str
+    full_name: str
+    role: str
+    avatar_letter: str
+    created_at: str
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserProfileResponse
+
+# Chat Persistence Schemas
+class ChatMessagePayload(BaseModel):
+    id: Optional[str] = None
+    sender: str  # 'user' | 'model'
+    text: str
+    timestamp: Optional[str] = None
+    modelUsed: Optional[str] = None
+    modelCapability: Optional[str] = None
+    routingReason: Optional[str] = None
+    thinkingDuration: Optional[str] = None
+    thinkingSteps: Optional[List[str]] = None
+    artifact: Optional[Dict[str, Any]] = None
+
+class ChatSessionCreateRequest(BaseModel):
+    id: Optional[str] = None
+    title: str
+    preview: Optional[str] = ""
+    model: Optional[str] = "llama3.1:8b"
+    is_pinned: Optional[bool] = False
+    workspace_id: Optional[str] = "default_workspace"
+
+class ChatSessionUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    is_pinned: Optional[bool] = None
+    preview: Optional[str] = None
+
+class ChatSessionSummaryResponse(BaseModel):
+    id: str
+    title: str
+    preview: str
+    timestamp: str
+    model: str
+    isPinned: bool
+    messageCount: int
+    path: str
+    workspace_id: str
+    created_at: str
+
+class ChatSessionDetailResponse(BaseModel):
+    id: str
+    title: str
+    preview: str
+    timestamp: str
+    model: str
+    isPinned: bool
+    messageCount: int
+    path: str
+    workspace_id: str
+    messages: List[ChatMessagePayload]
+    created_at: str
+
+# Multi-Format Document Compilation & Hardware Telemetry Schemas
+class DocumentCompileRequest(BaseModel):
+    title: str
+    content: str
+    format: str = "pdf"  # "pdf" | "docx" | "latex" | "html" | "all"
+    author_name: Optional[str] = "Lead AI Architect"
+    author_title: Optional[str] = "Lead Operations Engineer"
+    citations: Optional[List[Dict[str, Any]]] = None
+
+class DocumentCompileResponse(BaseModel):
+    title: str
+    format: str
+    filename: Optional[str] = None
+    download_url: Optional[str] = None
+    file_path: Optional[str] = None
+    formats: Optional[Dict[str, Any]] = None
+
+class SessionBundleResponse(BaseModel):
+    session_id: str
+    zip_filename: str
+    download_url: str
+    file_path: str
+

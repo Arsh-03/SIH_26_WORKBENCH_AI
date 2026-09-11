@@ -43,7 +43,7 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
 
   if (isUser) {
     return (
-      <div className={`flex justify-end my-4 ${className}`}>
+      <div id={`msg-${message.id}`} className={`flex justify-end my-4 scroll-mt-8 ${className}`}>
         {/* User Prompt: flat rectangle on Elevation 1 with hairline border */}
         <div className="max-w-2xl rounded-[4px] border-t border-r border-l border-b border-border bg-surface-1 px-5 py-3.5 shadow-sm">
           <div className="flex items-center justify-between gap-4 mb-1.5">
@@ -65,7 +65,7 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
   const processedText = preprocessMathText(message.text)
 
   return (
-    <div className={`flex flex-col items-start w-full max-w-3xl my-5 space-y-3 ${className}`}>
+    <div id={`msg-${message.id}`} className={`flex flex-col items-start w-full max-w-3xl my-5 space-y-3 scroll-mt-8 ${className}`}>
       {/* Model Response Header */}
       <div className="flex items-center gap-3 flex-wrap">
         <span className="font-mono text-[10px] uppercase tracking-widest text-accent-primary font-semibold">

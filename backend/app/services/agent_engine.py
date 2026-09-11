@@ -81,7 +81,12 @@ class AgentExecutionEngine:
         routing_reason = ""
 
         if supervisor_node:
-            sup_res = supervisor_node(initial_state)
+            try:
+                from ai_engine.agents.supervisor import supervisor_node_async
+                sup_res = await supervisor_node_async(initial_state)
+            except Exception as sup_err:
+                logger.warning(f"Async supervisor node failed ({sup_err}), falling back to sync supervisor.")
+                sup_res = supervisor_node(initial_state)
             plan = sup_res.get("plan", ["chat_agent"])
             selected_model = sup_res.get("selected_model", selected_model)
             model_capability = sup_res.get("model_capability", model_capability)
@@ -145,7 +150,8 @@ class AgentExecutionEngine:
             db_res = await db.execute(chunk_stmt)
             db_chunks = db_res.scalars().all()
 
-            if not db_chunks:
+            # Only search database chunks if documents were specifically requested or vector matched
+            if request.active_document_ids and not db_chunks:
                 fallback_res = await db.execute(select(DocumentChunk))
                 db_chunks = fallback_res.scalars().all()
 
@@ -154,7 +160,8 @@ class AgentExecutionEngine:
             for chk in db_chunks:
                 chk_content = chk.raw_content or ""
                 overlap_count = sum(1 for w in query_words if len(w) > 3 and w in chk_content.lower())
-                scored_db_chunks.append((overlap_count, chk, chk_content))
+                if overlap_count > 0:
+                    scored_db_chunks.append((overlap_count, chk, chk_content))
 
             scored_db_chunks.sort(key=lambda x: x[0], reverse=True)
             top_db_chunks = [c for score, c, c_text in scored_db_chunks[:4]]
@@ -169,16 +176,18 @@ class AgentExecutionEngine:
                         "content": chk.raw_content
                     })
 
-            for m in matches:
-                citation = ChunkCitation(
-                    document_id=m.get("document_id", "doc_sop"),
-                    chunk_id=m.get("chunk_id", "chk_001"),
-                    page_number=m.get("page_number", 1),
-                    snippet=m.get("content", "")[:120]
-                )
-                citations_collected.append(citation)
-                citation_traces.append(f"{citation.document_id}#{citation.chunk_id}")
-                rag_results_summary += f"\n[Doc: {citation.document_id}, Page: {citation.page_number}]\n{m.get('content', '')}\n"
+            # Only add to technical context if matches were found
+            if request.active_document_ids or matches:
+                for m in matches:
+                    citation = ChunkCitation(
+                        document_id=m.get("document_id", "doc_sop"),
+                        chunk_id=m.get("chunk_id", "chk_001"),
+                        page_number=m.get("page_number", 1),
+                        snippet=m.get("content", "")[:120]
+                    )
+                    citations_collected.append(citation)
+                    citation_traces.append(f"{citation.document_id}#{citation.chunk_id}")
+                    rag_results_summary += f"\n[Doc: {citation.document_id}, Page: {citation.page_number}]\n{m.get('content', '')}\n"
 
             await send_frame({
                 "event": "tool_result",
@@ -232,19 +241,72 @@ class AgentExecutionEngine:
 
         # Step 4: Multi-Turn Conversation Thread Memory & LLM Inference
         thread_history = self.session_histories.setdefault(session_id, [])
+        all_past_code_snippets = []
 
         from datetime import datetime
         today_date_str = datetime.now().strftime("%B %d, %Y")
 
+        user_name = "Lead AI Architect"
+        user_role = "Lead Operations Engineer"
+        if db:
+            try:
+                from backend.app.models.sql_models import DBChatSession, DBChatMessage, User
+                chat_sess = await db.get(DBChatSession, session_id)
+                if chat_sess and chat_sess.user_id:
+                    user_obj = await db.get(User, chat_sess.user_id)
+                    if user_obj:
+                        user_name = user_obj.full_name or user_obj.username
+                        user_role = user_obj.role or "Lead Operations Engineer"
+
+                # Load conversation history and artifacts from DB
+                db_msgs_res = await db.execute(
+                    select(DBChatMessage).where(DBChatMessage.session_id == session_id).order_by(DBChatMessage.created_at)
+                )
+                db_msgs = db_msgs_res.scalars().all()
+                if db_msgs:
+                    db_thread = []
+                    for m in db_msgs:
+                        # Extract code from artifact JSON if present
+                        if m.artifact:
+                            try:
+                                art_obj = json.loads(m.artifact)
+                                if isinstance(art_obj, dict) and "files" in art_obj:
+                                    for f_item in art_obj.get("files", []):
+                                        f_code = f_item.get("content", "")
+                                        f_lang = f_item.get("language", "")
+                                        if f_code and f_lang not in ["markdown", "text", "json"]:
+                                            all_past_code_snippets.append(f_code.strip())
+                            except Exception:
+                                pass
+
+                        # Extract code from markdown text
+                        if m.text:
+                            found_blocks = re.findall(r"```[a-zA-Z0-9_\-\+]*\n([\s\S]*?)```", m.text)
+                            for b in found_blocks:
+                                if len(b.strip()) > 10:
+                                    all_past_code_snippets.append(b.strip())
+
+                        role = "user" if m.sender == "user" else "assistant"
+                        # Do not duplicate current prompt if it was already inserted into db
+                        if m == db_msgs[-1] and m.sender == "user" and m.text == request.prompt:
+                            continue
+                        db_thread.append({"role": role, "content": m.text or ""})
+
+                    if len(db_thread) >= len(thread_history):
+                        thread_history = db_thread
+                        self.session_histories[session_id] = thread_history
+            except Exception as hist_err:
+                logger.error(f"Error loading thread history from DB: {hist_err}")
+
         system_instruction = (
             "You are the Sovereign AI Engineering Workbench Assistant.\n"
             f"Current On-Premise System Date: {today_date_str}.\n"
-            "Active User Profile: Rashmi (Lead Operations & Process Engineer).\n"
+            f"Active User Profile: {user_name} ({user_role}).\n"
             "Respond accurately, clearly, and concisely to the user's prompt.\n"
-            f"When drafting executive memos, SOPs, or formal documents, ALWAYS automatically populate the Date line with '{today_date_str}' and the From line with 'Rashmi, Lead Operations Engineer' instead of leaving generic brackets like [Your Name] or [Current Date].\n"
-            "CRITICAL FORMATTING DIRECTIVE: When writing formal memos, SOPs, or executive text reports, produce ONLY standard prose and document sections. Do NOT append Python scripts, code snippets, or markdown code blocks unless the user explicitly requested software code or script execution in their prompt."
+            f"When drafting executive memos, SOPs, or formal documents, ALWAYS automatically populate the Date line with '{today_date_str}' and the From line with '{user_name}, {user_role}' instead of leaving generic brackets like [Your Name] or [Current Date].\n"
+            "CRITICAL FORMATTING DIRECTIVE: When writing formal memos, SOPs, or executive text reports, produce ONLY standard prose and document sections. Do NOT append Python scripts, code snippets, or markdown code blocks unless the user explicitly requested software code or script execution in their prompt.\n"
+            "CRITICAL CODE INTEGRITY & COMPLETENESS DIRECTIVE: When writing, refactoring, modifying, or explaining code, ALWAYS keep and provide the COMPLETE code with ALL function definitions (`def ...`, `function ...`, `class ...`), helper functions, parameters, imports, and execution driver intact. NEVER omit, strip, or truncate function declarations or output incomplete fragments without their header definitions."
         )
-
 
         if rag_results_summary:
             system_instruction += f"\n\nRetrieved Technical Context:\n{rag_results_summary}"
@@ -269,6 +331,34 @@ class AgentExecutionEngine:
             if referenced_context_parts:
                 system_instruction += f"\n\nReferenced Target File Context for Targeted Edits:\n" + "\n\n".join(referenced_context_parts)
 
+        # Extract recent code and topic context from previous conversation turns
+        recent_code_in_thread = all_past_code_snippets[0] if all_past_code_snippets else ""
+        if not recent_code_in_thread:
+            for past_msg in reversed(thread_history):
+                past_content = past_msg.get("content", "")
+                found_blocks = re.findall(r"```[a-zA-Z0-9_\-\+]*\n([\s\S]*?)```", past_content)
+                if found_blocks:
+                    recent_code_in_thread = found_blocks[0].strip()
+                    break
+
+        is_doc_or_explain = any(kw in prompt_low for kw in [
+            "doc", "document", "documentation", "spec", "specification", 
+            "report", "overview", "memo", "sop", "fix it", "create a doc", "generate doc"
+        ])
+        if recent_code_in_thread and is_doc_or_explain and not request.active_document_ids:
+            system_instruction += (
+                f"\n\nSource Code from Active Conversation for Documentation Reference:\n```\n{recent_code_in_thread}\n```\n"
+                "DOCUMENT GENERATION DIRECTIVE: The user is asking to create a formal Technical Design Document & Code Specification for the exact code provided above from this conversation.\n"
+                "Generate a complete, thorough, professional Technical Specification formatted in Markdown:\n"
+                "# Technical Specification: [Module/Function Name]\n"
+                "## Executive Summary\n"
+                "## Functional Overview & Architecture\n"
+                "## Implementation Breakdown & Code Logic\n"
+                "## Complexity Analysis (Time & Space)\n"
+                "## Parameters, Return Types & Data Structures\n"
+                "## Usage & Verification Guide\n\n"
+                "CRITICAL: Do NOT generate industrial boiler, MAWP, or ASME SOP documents. Document STRICTLY the provided source code."
+            )
 
         # Automatic Context Memory Compression for long sessions (> 10 messages)
         if len(thread_history) > 10:
@@ -314,11 +404,28 @@ class AgentExecutionEngine:
             )
 
         if not model_response:
-            # Fallback if local Ollama or remote server is currently offline
-            if "chat_agent" in plan or any(kw in prompt_low for kw in ["hey", "hi", "hello"]):
-                model_response = "Hello! I am your Sovereign AI Workbench Assistant. How can I assist you with your code, technical documents, or system architecture?"
+            # Check Ollama health to provide precise diagnostic
+            health = await ollama_client.check_health()
+            if health.get("running"):
+                avail = health.get("available_models", [])
+                if not avail:
+                    model_response = (
+                        f"⚡ **Connected to Ollama** at `{ollama_client.base_url}`, but **no models have been downloaded yet**.\n\n"
+                        f"👉 **To fix this**, open your Google Colab notebook and run this cell:\n"
+                        f"```bash\n!ollama pull qwen2.5-coder:7b\n```\n"
+                        f"Once downloaded, retry your prompt!"
+                    )
+                else:
+                    model_response = (
+                        f"⚠️ Requested model `{selected_model}` is not downloaded on Ollama.\n\n"
+                        f"**Available models:** {', '.join([f'`{m}`' for m in avail])}\n\n"
+                        f"👉 Run `!ollama pull {selected_model}` in Colab to install it."
+                    )
             else:
-                model_response = "Unable to connect to the sovereign LLM runtime. Please verify that Ollama or your inference endpoint is active."
+                if "chat_agent" in plan or any(kw in prompt_low for kw in ["hey", "hi", "hello"]):
+                    model_response = "Hello! I am your Sovereign AI Workbench Assistant. How can I assist you with your code, technical documents, or system architecture?"
+                else:
+                    model_response = "Unable to connect to the sovereign LLM runtime. Please verify that Ollama or your inference endpoint is active."
 
 
         # Update session thread history
@@ -327,68 +434,41 @@ class AgentExecutionEngine:
 
         duration_ms = int((time.perf_counter() - start_time) * 1000)
 
-        # Build interactive artifact dynamically for code OR document creation requests
+        # Build interactive artifact dynamically for document creation OR code generation requests
         artifact_data = None
         code_blocks = re.findall(r"```([a-zA-Z0-9_\-\+]*)\n([\s\S]*?)```", model_response)
 
-        is_code_request = "code_agent" in plan or any(kw in prompt_low for kw in ["code", "script", "component", "write", "create", "build", "refactor", "function", "class"])
-        is_doc_request = model_capability == "document_creation" or "rag_agent" in plan or any(kw in prompt_low for kw in ["memo", "sop", "procedure", "report", "document", "draft", "docx"])
+        is_explain_request = any(kw in prompt_low for kw in ["walkthrough", "breakdown", "explain", "complexity"])
+        is_doc_request = (
+            model_capability == "document_creation" or 
+            "rag_agent" in plan or 
+            any(kw in prompt_low for kw in [
+                "doc", "document", "docx", "memo", "sop", "procedure", 
+                "report", "draft", "specification", "spec", "save as doc", "save the output", "save in doc"
+            ])
+        )
+        is_code_request = (
+            not is_doc_request and 
+            ("code_agent" in plan or any(kw in prompt_low for kw in ["code", "script", "component", "write", "create", "build", "refactor", "function", "class"])) and 
+            not is_explain_request
+        )
 
-        if code_blocks and is_code_request:
-            raw_lang, raw_code = code_blocks[0]
-            raw_lang = raw_lang.lower().strip() or "code"
-            code_trimmed = raw_code.strip()
+        if is_doc_request and len(model_response.strip()) > 30:
+            subj_match = (
+                re.search(r"^#\s*([^\n]+)", model_response, re.MULTILINE) or 
+                re.search(r"(?:Subject|Title|Document Name|MEMORANDUM):\s*([^\n]+)", model_response, re.IGNORECASE)
+            )
+            raw_title = subj_match.group(1).strip() if subj_match else ("Technical_Code_Specification" if recent_code_in_thread else "Executive_Engineering_Document")
+            clean_title = re.sub(r'[*#_`]', ' ', raw_title).strip()
+            clean_title = re.sub(r'\s+', ' ', clean_title)
 
-            if raw_lang in ["java", "jdk"]:
-                class_match = re.search(r'public\s+class\s+([A-Za-z0-9_]+)', code_trimmed)
-                filename = f"{class_match.group(1)}.java" if class_match else "Main.java"
-                badge = "Java · JDK 21"
-                lang = "java"
-            elif raw_lang in ["python", "py"]:
-                class_match = re.search(r'class\s+([A-Za-z0-9_]+)', code_trimmed) or re.search(r'def\s+([A-Za-z0-9_]+)', code_trimmed)
-                filename = f"{class_match.group(1).lower()}.py" if class_match else "script.py"
-                badge = "Python · Enclave Runner"
-                lang = "python"
-            elif raw_lang in ["typescript", "ts", "tsx", "javascript", "js", "jsx"]:
-                comp_match = re.search(r'(?:export\s+(?:const|function|class)|function)\s+([A-Za-z0-9_]+)', code_trimmed)
-                ext = "tsx" if ("<" in code_trimmed and ">" in code_trimmed) or raw_lang in ["tsx", "jsx"] else "ts"
-                filename = f"{comp_match.group(1)}.{ext}" if comp_match else f"Component.{ext}"
-                badge = f"TypeScript · React" if ext == "tsx" else "TypeScript · Node.js"
-                lang = "typescript"
-            elif raw_lang in ["cpp", "c++", "c"]:
-                filename = "main.cpp" if "++" in raw_lang or "cpp" in raw_lang else "main.c"
-                badge = "C++ · Native"
-                lang = "cpp"
-            elif raw_lang in ["sql", "postgres", "sqlite"]:
-                filename = "migration.sql"
-                badge = "SQL · Database"
-                lang = "sql"
-            else:
-                filename = f"artifact.{raw_lang}"
-                badge = f"{raw_lang.upper()} · Artifact"
-                lang = raw_lang
-
-            artifact_data = {
-                "id": generate_id(f"art_{lang}"),
-                "title": filename,
-                "badge": badge,
-                "activeFile": filename,
-                "files": [
-                    {
-                        "name": filename,
-                        "language": lang,
-                        "content": code_trimmed
-                    }
-                ]
-            }
-        elif is_doc_request and len(model_response.strip()) > 50:
-            subj_match = re.search(r"(?:Subject|Title|MEMORANDUM):\s*([^\n]+)", model_response, re.IGNORECASE) or re.search(r"#\s*([^\n]+)", model_response)
-            doc_title = subj_match.group(1).strip() if subj_match else "Executive_SOP_Memo"
             doc_res = generate_docx_document(
-                title=doc_title,
+                title=clean_title,
                 content=model_response,
                 citations=[c.model_dump() for c in citations_collected],
-                output_dir=settings.ARTIFACTS_DIR
+                output_dir=settings.ARTIFACTS_DIR,
+                author_name=user_name,
+                author_title=user_role
             )
             artifact_data = {
                 "id": generate_id("art_docx"),
@@ -405,7 +485,6 @@ class AgentExecutionEngine:
                 ]
             }
 
-            clean_title = doc_title.replace("_", " ").strip()
             summary_match = re.search(r"(?:Summary|Executive Summary|Purpose):\s*([^\n]+)", model_response, re.IGNORECASE)
             summary_excerpt = f"\n\n**Executive Summary:** {summary_match.group(1).strip()}" if summary_match else ""
 
@@ -422,11 +501,104 @@ class AgentExecutionEngine:
                 "step": step_counter,
                 "tool_name": "generate_docx_document",
                 "tool_call_id": generate_id("call_doc"),
-                "parameters": {"title": doc_title, "format": "docx"}
+                "parameters": {"title": clean_title, "format": "docx"}
             })
             step_counter += 1
 
+        elif code_blocks and (is_code_request or any("def " in cb[1] or "class " in cb[1] or "int main" in cb[1] or "#include" in cb[1] for cb in code_blocks)):
+            # Pick the most complete code block containing function definitions
+            def score_block(b):
+                lang, code_str = b
+                score = len(code_str)
+                if any(kw in code_str for kw in ["def ", "class ", "function ", "int main", "public class", "#include"]):
+                    score += 10000
+                return score
 
+            best_block = max(code_blocks, key=score_block)
+            raw_lang, raw_code = best_block
+            raw_lang = raw_lang.lower().strip() or "code"
+            code_trimmed = raw_code.strip()
+
+            if raw_lang in ["c"]:
+                filename = "main.c"
+                badge = "C · GCC / Native"
+                lang = "c"
+            elif raw_lang in ["cpp", "c++", "cc", "cxx", "hpp", "h"]:
+                filename = "main.cpp"
+                badge = "C++ · G++ / Native"
+                lang = "cpp"
+            elif raw_lang in ["java", "jdk"]:
+                class_match = re.search(r'public\s+class\s+([A-Za-z0-9_]+)', code_trimmed)
+                filename = f"{class_match.group(1)}.java" if class_match else "Main.java"
+                badge = "Java · OpenJDK 21"
+                lang = "java"
+            elif raw_lang in ["python", "py", "python3"]:
+                class_match = re.search(r'class\s+([A-Za-z0-9_]+)', code_trimmed) or re.search(r'def\s+([A-Za-z0-9_]+)', code_trimmed)
+                filename = f"{class_match.group(1).lower()}.py" if class_match else "script.py"
+                badge = "Python · Enclave Runner"
+                lang = "python"
+            elif raw_lang in ["typescript", "ts", "tsx"]:
+                comp_match = re.search(r'(?:export\s+(?:const|function|class)|function)\s+([A-Za-z0-9_]+)', code_trimmed)
+                ext = "tsx" if ("<" in code_trimmed and ">" in code_trimmed) or raw_lang == "tsx" else "ts"
+                filename = f"{comp_match.group(1)}.{ext}" if comp_match else f"Component.{ext}"
+                badge = "TypeScript · React" if ext == "tsx" else "TypeScript · Node.js"
+                lang = "typescript"
+            elif raw_lang in ["javascript", "js", "jsx"]:
+                comp_match = re.search(r'(?:export\s+(?:const|function|class)|function)\s+([A-Za-z0-9_]+)', code_trimmed)
+                ext = "jsx" if ("<" in code_trimmed and ">" in code_trimmed) or raw_lang == "jsx" else "js"
+                filename = f"{comp_match.group(1)}.{ext}" if comp_match else f"index.{ext}"
+                badge = "JavaScript · React" if ext == "jsx" else "JavaScript · Node.js"
+                lang = "javascript"
+            elif raw_lang in ["rust", "rs"]:
+                filename = "main.rs"
+                badge = "Rust · Cargo"
+                lang = "rust"
+            elif raw_lang in ["go", "golang"]:
+                filename = "main.go"
+                badge = "Go · Native"
+                lang = "go"
+            elif raw_lang in ["csharp", "cs", "c#"]:
+                filename = "Program.cs"
+                badge = "C# · .NET"
+                lang = "csharp"
+            elif raw_lang in ["bash", "sh", "shell", "zsh"]:
+                filename = "script.sh"
+                badge = "Bash · Shell Enclave"
+                lang = "bash"
+            elif raw_lang in ["sql", "postgres", "sqlite", "mysql"]:
+                filename = "query.sql"
+                badge = "SQL · Database"
+                lang = "sql"
+            elif raw_lang in ["html", "htm"]:
+                filename = "index.html"
+                badge = "HTML · Web Preview"
+                lang = "html"
+            elif raw_lang in ["css", "scss", "sass"]:
+                filename = "styles.css"
+                badge = "CSS · Stylesheet"
+                lang = "css"
+            elif raw_lang in ["json"]:
+                filename = "data.json"
+                badge = "JSON · Data"
+                lang = "json"
+            else:
+                filename = f"source.{raw_lang}"
+                badge = f"{raw_lang.upper()} · Artifact"
+                lang = raw_lang
+
+            artifact_data = {
+                "id": generate_id(f"art_{lang}"),
+                "title": filename,
+                "badge": badge,
+                "activeFile": filename,
+                "files": [
+                    {
+                        "name": filename,
+                        "language": lang,
+                        "content": code_trimmed
+                    }
+                ]
+            }
 
         # Step 5: Record Cryptographic Audit Trail in SQLite
         audit_record = AuditLog(
@@ -441,6 +613,11 @@ class AgentExecutionEngine:
         )
         db.add(audit_record)
         await db.commit()
+
+        # Update in-memory session history for turn continuity
+        if session_id in self.session_histories:
+            self.session_histories[session_id].append({"role": "user", "content": request.prompt})
+            self.session_histories[session_id].append({"role": "assistant", "content": model_response})
 
         # Step 6: Emit final_answer frame over WebSocket
         final_frame = {

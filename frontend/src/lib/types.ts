@@ -28,6 +28,9 @@ export interface RecentChat {
 }
 
 export interface UserProfile {
+  id?: string
+  username?: string
+  email?: string
   name: string
   role: string
   avatarLetter: string
@@ -91,6 +94,9 @@ export interface ArtifactData {
   versions?: ArtifactVersion[]
   diffPreview?: DiffLine[]
   terminalOutput?: string
+  terminalExitCode?: number
+  terminalDurationMs?: number
+  terminalCommand?: string
 }
 
 export interface ChatMessage {

@@ -16,7 +16,7 @@ export const ChatsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'pinned' | 'recent'>('all')
   const navigate = useNavigate()
-  const { chatSessions, loadChatSession } = useWorkbench()
+  const { chatSessions, loadChatSession, togglePinChat } = useWorkbench()
 
   const filteredChats = chatSessions.filter((chat) => {
     const matchesQuery =
@@ -109,23 +109,35 @@ export const ChatsPage: React.FC = () => {
                   <h2 className="font-display text-base font-medium text-text-primary group-hover:text-accent-primary transition-colors truncate">
                     {chat.title}
                   </h2>
-                  {chat.isPinned && (
-                    <span
-                      aria-label="Pinned Chat"
-                      className="text-accent-primary text-xs shrink-0 select-none"
+                  {/* Pin Toggle Button on Row */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      togglePinChat(chat.id)
+                    }}
+                    title={chat.isPinned ? 'Unpin chat' : 'Pin chat to top'}
+                    aria-label={chat.isPinned ? 'Unpin chat' : 'Pin chat'}
+                    className={`p-1 rounded transition-all cursor-pointer ${
+                      chat.isPinned
+                        ? 'text-accent-primary opacity-100 hover:scale-110'
+                        : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 text-text-muted hover:text-accent-primary hover:scale-110'
+                    }`}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      width="13"
+                      height="13"
+                      fill={chat.isPinned ? 'currentColor' : 'none'}
+                      stroke="currentColor"
+                      strokeWidth={chat.isPinned ? '0' : '2'}
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        width="12"
-                        height="12"
-                        fill="currentColor"
-                      >
-                        <path d="M16 3a1 1 0 0 1 .117 1.993L16 5v4.586l1.707 1.707a1 1 0 0 1 .286.607l.007.1V14a1 1 0 0 1-.883.993L17 15h-4v6a1 1 0 0 1-1.993.117L11 21v-6H7a1 1 0 0 1-.993-.883L6 14v-2a1 1 0 0 1 .206-.607l.087-.1 1.707-1.707V5a1 1 0 0 1-.117-1.993L8 3h8z" />
-                      </svg>
-                    </span>
-                  )}
+                      <path d="M16 3a1 1 0 0 1 .117 1.993L16 5v4.586l1.707 1.707a1 1 0 0 1 .286.607l.007.1V14a1 1 0 0 1-.883.993L17 15h-4v6a1 1 0 0 1-1.993.117L11 21v-6H7a1 1 0 0 1-.993-.883L6 14v-2a1 1 0 0 1 .206-.607l.087-.1 1.707-1.707V5a1 1 0 0 1-.117-1.993L8 3h8z" />
+                    </svg>
+                  </button>
                 </div>
+
 
                 <p className="font-body text-xs italic text-text-muted line-clamp-1 leading-relaxed">
                   {chat.preview}
