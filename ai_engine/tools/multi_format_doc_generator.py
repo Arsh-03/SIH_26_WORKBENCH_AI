@@ -3,8 +3,6 @@ import re
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import markdown
-import weasyprint
-
 # Import DOCX generator from existing tool
 from ai_engine.tools.doc_generator import generate_docx_document
 
@@ -358,7 +356,23 @@ def generate_pdf_document(
     filename = _clean_filename(f"{title}_Document", "pdf")
     file_path = os.path.join(output_dir, filename)
 
-    weasyprint.HTML(string=full_html).write_pdf(file_path)
+    try:
+        # pyrefly: ignore [missing-import]
+        import weasyprint
+        weasyprint.HTML(string=full_html).write_pdf(file_path)
+    except (ImportError, OSError, Exception) as e:
+        # Fallback to saving styled standalone HTML print document if WeasyPrint C-libraries (GTK/libgobject) are missing
+        html_filename = _clean_filename(f"{title}_Document", "html")
+        html_file_path = os.path.join(output_dir, html_filename)
+        with open(html_file_path, "w", encoding="utf-8") as f:
+            f.write(full_html)
+        return {
+            "file_path": html_file_path,
+            "filename": html_filename,
+            "download_url": f"/api/v1/artifacts/download/{html_filename}",
+            "format": "html",
+            "warning": f"PDF engine fallback to HTML (WeasyPrint requires GTK libraries: {e})"
+        }
 
     return {
         "file_path": file_path,
@@ -379,6 +393,7 @@ def generate_html_document(
     """
     Compiles markdown content into a self-contained, standalone styled HTML archive.
     """
+    # pyrefly: ignore [missing-import]
     from jinja2 import Template
     os.makedirs(output_dir, exist_ok=True)
     today_str = datetime.now().strftime("%B %d, %Y")

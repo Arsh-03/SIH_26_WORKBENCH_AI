@@ -117,6 +117,37 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
+  const openSettings = useCallback(() => {
+    setIsSettingsOpen(true)
+  }, [])
+
+  const closeSettings = useCallback(() => {
+    setIsSettingsOpen(false)
+  }, [])
+
+  const toggleSettings = useCallback(() => {
+    setIsSettingsOpen((prev) => !prev)
+  }, [])
+
+  const refreshChatSessions = useCallback(async () => {
+    try {
+      const serverSessions = await api.getChatSessions()
+      if (Array.isArray(serverSessions) && serverSessions.length > 0) {
+        setChatSessions(serverSessions)
+        saveSessions(user?.id, serverSessions)
+      }
+    } catch (e) {
+      console.warn('Failed to refresh chat sessions from server:', e)
+    }
+  }, [user?.id])
+
+  // Automatically refresh sessions on user load
+  useEffect(() => {
+    if (user?.id) {
+      refreshChatSessions()
+    }
+  }, [user?.id, refreshChatSessions])
+
   const toggleSidebar = useCallback(() => {
     setIsSidebarOpen((prev) => !prev)
   }, [])
