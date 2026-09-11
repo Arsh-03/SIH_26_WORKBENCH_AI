@@ -74,6 +74,13 @@ export interface WorkbenchContextType {
   isCmdPaletteOpen: boolean
   setIsCmdPaletteOpen: React.Dispatch<React.SetStateAction<boolean>>
 
+  // Settings Modal Overlay State
+  isSettingsOpen: boolean
+  setIsSettingsOpen: React.Dispatch<React.SetStateAction<boolean>>
+  openSettings: () => void
+  closeSettings: () => void
+  toggleSettings: () => void
+
   // Sidebar Open/Close State
   isSidebarOpen: boolean
   setIsSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>
@@ -101,23 +108,40 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const [currentChatId, setCurrentChatId] = useState<string | null>(() => `chat_${Date.now()}`)
   const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+
+  const openSettings = useCallback(() => {
+    setIsSettingsOpen(true)
+  }, [])
+
+  const closeSettings = useCallback(() => {
+    setIsSettingsOpen(false)
+  }, [])
+
+  const toggleSettings = useCallback(() => {
+    setIsSettingsOpen((prev) => !prev)
+  }, [])
 
   const toggleSidebar = useCallback(() => {
     setIsSidebarOpen((prev) => !prev)
   }, [])
 
-  // Keyboard shortcut ⌘B / Ctrl+B to toggle sidebar
+  // Keyboard shortcut ⌘B / Ctrl+B to toggle sidebar, ⌘, / Ctrl+, for Settings
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault()
         toggleSidebar()
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+        e.preventDefault()
+        toggleSettings()
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [toggleSidebar])
+  }, [toggleSidebar, toggleSettings])
 
   // Toggle tool state
   const toggleTool = useCallback((toolKey: keyof ActiveToolsState) => {
@@ -494,6 +518,11 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         deleteChatSession,
         isCmdPaletteOpen,
         setIsCmdPaletteOpen,
+        isSettingsOpen,
+        setIsSettingsOpen,
+        openSettings,
+        closeSettings,
+        toggleSettings,
         isSidebarOpen,
         setIsSidebarOpen,
         toggleSidebar,

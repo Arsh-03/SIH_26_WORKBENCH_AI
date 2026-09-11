@@ -49,7 +49,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   className = '',
 }) => {
   const location = useLocation()
-  const { chatSessions, loadChatSession, isSidebarOpen, toggleSidebar } = useWorkbench()
+  const { chatSessions, loadChatSession, isSidebarOpen, toggleSidebar, openSettings, isSettingsOpen } = useWorkbench()
 
   // Dynamic recent chats from real persistent sessions
   const dynamicRecentChats = recentChats || chatSessions.slice(0, 7).map((s) => ({
@@ -79,7 +79,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
        ========================================================================= */
     return (
       <aside
-        className={`relative flex h-screen w-14 shrink-0 select-none flex-col justify-between border-r border-border bg-surface-1 py-3 text-text-body font-body z-20 ${className}`}
+        className={`relative flex h-screen w-14 shrink-0 select-none flex-col justify-between border-r border-border bg-surface-1 py-3 text-text-body font-body z-20 overflow-visible ${className}`}
       >
         {/* Top: Logo Mark + Expand Trigger */}
         <div className="flex flex-col items-center gap-4">
@@ -101,26 +101,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </span>
           </button>
 
-          {/* New Chat Icon Button */}
+          {/* New Chat Icon Button (Strong Right Breakout) */}
           <button
             type="button"
             onClick={onNewChat}
             title="New Chat (⌘N)"
             aria-label="New Chat"
-            className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-accent-primary/40 bg-accent-primary/10 text-accent-primary hover:bg-accent-primary/20 hover:border-accent-primary transition-all cursor-pointer shadow-xs"
+            className="group relative flex h-8 w-8 items-center justify-center rounded-[4px] border border-accent-primary/40 bg-accent-primary/10 text-accent-primary transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer shadow-xs motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] hover:bg-accent-primary/25 hover:border-accent-primary hover:shadow-[0_0_12px_rgba(217,122,63,0.3)] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06]"
           >
-            <span className="font-mono text-base font-bold leading-none">+</span>
+            <span className="font-mono text-base font-bold leading-none inline-block transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:drop-shadow-[0_0_8px_rgba(217,122,63,0.45)]">
+              +
+            </span>
           </button>
 
-          {/* Search Trigger Icon */}
+          {/* Search Trigger Icon (Strong Right Breakout) */}
           <button
             type="button"
             onClick={onOpenCmdPalette}
             title="Search Chats (⌘K)"
             aria-label="Search Chats"
-            className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-border/80 bg-surface-2/60 text-text-muted hover:text-text-primary hover:border-text-muted/60 transition-all cursor-pointer"
+            className="group relative flex h-8 w-8 items-center justify-center rounded-[4px] border border-border/80 bg-surface-2/60 text-text-muted transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] hover:text-text-primary hover:border-accent-primary/50 hover:bg-surface-2 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06]"
           >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
           </button>
@@ -129,47 +131,47 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* Nav Icons */}
           <div className="flex flex-col items-center gap-2">
-            {/* Chats Icon */}
+            {/* Chats Icon (Strong Right Breakout) */}
             <Link
               to="/chats"
               title={`Chats (${chatSessions.length})`}
-              className={`flex h-8 w-8 items-center justify-center rounded-[4px] transition-all cursor-pointer ${
+              className={`group relative flex h-8 w-8 items-center justify-center rounded-[4px] transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06] ${
                 resolvedActiveNav === 'chats'
-                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40'
-                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/60'
+                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]'
+                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/90 hover:border-accent-primary/40 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] border border-transparent'
               }`}
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
             </Link>
 
-            {/* Projects Icon */}
+            {/* Projects Icon (Strong Right Breakout) */}
             <Link
               to="/projects"
               title="Projects (05)"
-              className={`flex h-8 w-8 items-center justify-center rounded-[4px] transition-all cursor-pointer ${
+              className={`group relative flex h-8 w-8 items-center justify-center rounded-[4px] transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06] ${
                 resolvedActiveNav === 'projects'
-                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40'
-                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/60'
+                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]'
+                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/90 hover:border-accent-primary/40 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] border border-transparent'
               }`}
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
               </svg>
             </Link>
 
-            {/* Library Icon */}
+            {/* Library Icon (Strong Right Breakout) */}
             <Link
               to="/library"
               title="Library (18)"
-              className={`flex h-8 w-8 items-center justify-center rounded-[4px] transition-all cursor-pointer ${
+              className={`group relative flex h-8 w-8 items-center justify-center rounded-[4px] transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06] ${
                 resolvedActiveNav === 'library'
-                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40'
-                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/60'
+                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]'
+                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/90 hover:border-accent-primary/40 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] border border-transparent'
               }`}
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
               </svg>
             </Link>
@@ -189,17 +191,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </span>
           </div>
 
-          {/* Settings */}
-          <Link
-            to="/settings"
-            title="Settings"
-            className="flex h-7 w-7 items-center justify-center rounded text-text-muted hover:text-accent-primary transition-colors"
+          {/* Settings (Strong Right Breakout) */}
+          <button
+            type="button"
+            onClick={openSettings}
+            title="Settings (⌘,)"
+            aria-label="Settings"
+            className={`group relative flex h-7 w-7 items-center justify-center rounded transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06] ${
+              isSettingsOpen
+                ? 'text-accent-primary bg-surface-2 border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]'
+                : 'text-text-muted hover:text-accent-primary hover:bg-surface-2/80 hover:border-accent-primary/30 hover:shadow-[0_0_8px_rgba(217,122,63,0.15)] border border-transparent'
+            }`}
           >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-3.5 w-3.5 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-          </Link>
+          </button>
 
           {/* User Avatar */}
           <div
@@ -216,9 +224,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside
-      className={`relative flex h-screen w-[280px] shrink-0 select-none flex-col justify-between border-r border-border bg-surface-1 text-text-body font-body ${className}`}
+      className={`relative flex h-screen w-[280px] shrink-0 select-none flex-col justify-between border-r border-border bg-surface-1 text-text-body font-body z-20 overflow-visible ${className}`}
     >
-      <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex h-full flex-col overflow-x-visible overflow-y-hidden">
         {/* Brand Header with Minimize / Collapse Trigger */}
         <div className="border-b border-border/80 px-5 py-4 flex items-center justify-between">
           <Link to="/" className="group block flex-1">
@@ -241,9 +249,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={toggleSidebar}
             title="Minimize sidebar (⌘B)"
             aria-label="Minimize sidebar"
-            className="flex h-7 w-7 items-center justify-center rounded-[3px] border border-border/80 bg-surface-2/70 text-text-muted hover:text-accent-primary hover:border-accent-primary/60 transition-all cursor-pointer shrink-0"
+            className="group flex h-7 w-7 items-center justify-center rounded-[3px] border border-border/80 bg-surface-2/70 text-text-muted hover:text-accent-primary hover:border-accent-primary/60 transition-all cursor-pointer shrink-0"
           >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-3.5 w-3.5 transition-transform duration-200 ease-out motion-safe:group-hover:-translate-x-1 motion-safe:group-hover:scale-105 motion-safe:group-focus-visible:-translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
             </svg>
           </button>
@@ -257,12 +265,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 type="button"
                 onClick={onNewChat}
-                className="group inline-flex items-center gap-2 text-sm font-medium text-text-primary transition-colors text-left"
+                className="group inline-flex items-center gap-2 text-sm font-medium text-text-primary transition-colors text-left cursor-pointer"
               >
-                <span className="font-mono text-sm text-accent-primary leading-none transition-transform group-hover:scale-125">
-                  +
+                <span className="flex h-5 w-5 items-center justify-center rounded-[3px] bg-surface-2/80 border border-border/80 text-accent-primary transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-1 motion-safe:group-hover:scale-[1.04] motion-safe:group-hover:bg-accent-primary/20 motion-safe:group-hover:border-accent-primary/50 motion-safe:group-hover:shadow-[0_0_8px_rgba(217,122,63,0.2)] motion-safe:group-focus-visible:translate-x-1 motion-safe:group-focus-visible:scale-[1.04] shrink-0">
+                  <span className="font-mono text-sm font-bold leading-none inline-block transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.05] motion-safe:group-hover:drop-shadow-[0_0_8px_rgba(217,122,63,0.45)]">
+                    +
+                  </span>
                 </span>
-                <span className="tracking-tight">New Chat</span>
+                <span className="tracking-tight inline-block transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-0.5 motion-safe:group-focus-visible:translate-x-0.5">New Chat</span>
               </button>
             </AmberUnderlineWrapper>
             <span className="font-mono text-[11px] text-text-muted">⌘N</span>
@@ -272,12 +282,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={onOpenCmdPalette}
-            className="flex w-full items-center justify-between rounded bg-surface-2 border border-border/90 px-3 py-2 text-xs text-text-muted transition-colors hover:border-text-muted/60 hover:text-text-primary text-left"
+            className="group flex w-full items-center justify-between rounded bg-surface-2 border border-border/90 px-3 py-2 text-xs text-text-muted transition-all duration-200 hover:border-accent-primary/40 hover:text-text-primary hover:bg-surface-2/90 hover:shadow-[0_0_10px_rgba(217,122,63,0.08)] text-left cursor-pointer"
           >
             <div className="flex items-center gap-2">
-              <span className="font-body text-xs">Search chats</span>
+              <span className="flex h-5 w-5 items-center justify-center rounded-[3px] bg-surface-1 border border-border/80 text-text-muted transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-1 motion-safe:group-hover:scale-[1.04] motion-safe:group-hover:border-accent-primary/40 motion-safe:group-hover:bg-surface-2 motion-safe:group-hover:text-accent-primary motion-safe:group-hover:shadow-[0_0_8px_rgba(217,122,63,0.18)] motion-safe:group-focus-visible:translate-x-1 motion-safe:group-focus-visible:scale-[1.04] shrink-0">
+                <svg className="h-3.5 w-3.5 shrink-0 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.05] motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </span>
+              <span className="font-body text-xs inline-block transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-0.5 motion-safe:group-focus-visible:translate-x-0.5">Search chats</span>
             </div>
-            <kbd className="rounded border border-border/90 bg-surface-1 px-1.5 py-0.5 font-mono text-[10px] text-text-body uppercase tracking-wider">
+            <kbd className="rounded border border-border/90 bg-surface-1 px-1.5 py-0.5 font-mono text-[10px] text-text-body uppercase tracking-wider group-hover:border-accent-primary/30 transition-colors">
               ⌘K
             </kbd>
           </button>
@@ -290,20 +305,50 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <Link
                   key={item.id}
                   to={item.to}
-                  className={`group flex items-center justify-between border-b border-border/40 py-2 px-2 text-xs transition-colors rounded-[2px] ${
+                  className={`group flex items-center justify-between border-b border-border/40 py-2 px-2 text-xs transition-all duration-200 rounded-[2px] ${
                     isActive
-                      ? 'text-text-primary font-medium border-l-2 border-accent-primary bg-surface-2/40 pl-2.5'
-                      : 'text-text-body hover:text-text-primary hover:bg-surface-2/20 border-l-2 border-transparent'
+                      ? 'text-text-primary font-medium border-l-2 border-accent-primary bg-surface-2/60 shadow-[inset_0_0_12px_rgba(217,122,63,0.06)] pl-2.5'
+                      : 'text-text-body hover:text-text-primary hover:bg-surface-2/40 border-l-2 border-transparent'
                   }`}
                 >
-                  <AmberUnderlineWrapper active={isActive}>
-                    <span>{item.label}</span>
-                  </AmberUnderlineWrapper>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span
+                      className={`flex h-5 w-5 items-center justify-center rounded-[3px] transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-1 motion-safe:group-hover:scale-[1.04] motion-safe:group-hover:border-accent-primary/50 motion-safe:group-hover:shadow-[0_0_8px_rgba(217,122,63,0.2)] motion-safe:group-focus-visible:translate-x-1 motion-safe:group-focus-visible:scale-[1.04] shrink-0 ${
+                        isActive
+                          ? 'bg-accent-primary/20 border border-accent-primary/40 text-accent-primary shadow-[0_0_8px_rgba(217,122,63,0.18)]'
+                          : 'bg-surface-2/70 border border-border/70 text-text-muted motion-safe:group-hover:bg-surface-2 motion-safe:group-hover:text-accent-primary'
+                      }`}
+                    >
+                      <span className="inline-flex items-center justify-center transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.05] motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]">
+                        {item.id === 'chats' && (
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                          </svg>
+                        )}
+                        {item.id === 'projects' && (
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                          </svg>
+                        )}
+                        {item.id === 'library' && (
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                          </svg>
+                        )}
+                      </span>
+                    </span>
+                    <AmberUnderlineWrapper
+                      active={isActive}
+                      className="transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-0.5 motion-safe:group-focus-visible:translate-x-0.5"
+                    >
+                      <span>{item.label}</span>
+                    </AmberUnderlineWrapper>
+                  </div>
                   {item.id === 'chats' ? (
                     <span
                       className={`font-mono text-[11px] transition-colors ${
                         isActive
-                          ? 'text-accent-primary'
+                          ? 'text-accent-primary font-semibold'
                           : 'text-text-muted group-hover:text-text-body'
                       }`}
                     >
@@ -313,7 +358,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <span
                       className={`font-mono text-[11px] transition-colors ${
                         isActive
-                          ? 'text-accent-primary'
+                          ? 'text-accent-primary font-semibold'
                           : 'text-text-muted group-hover:text-text-body'
                       }`}
                     >
@@ -441,18 +486,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          <Link
-            to="/settings"
-            className={`text-xs transition-colors ${
-              resolvedActiveNav === 'settings'
-                ? 'text-accent-primary font-medium'
-                : 'text-text-muted hover:text-text-primary'
+          <button
+            type="button"
+            onClick={openSettings}
+            className={`group inline-flex items-center gap-2 px-2 py-1 rounded text-xs transition-all duration-200 cursor-pointer ${
+              isSettingsOpen
+                ? 'text-accent-primary font-medium bg-surface-2/80 shadow-[0_0_8px_rgba(217,122,63,0.15)]'
+                : 'text-text-muted hover:text-text-primary hover:bg-surface-2/50'
             }`}
           >
-            <AmberUnderlineWrapper active={resolvedActiveNav === 'settings'}>
+            <span
+              className={`flex h-5 w-5 items-center justify-center rounded-[3px] transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-1 motion-safe:group-hover:scale-[1.04] motion-safe:group-hover:border-accent-primary/50 motion-safe:group-hover:shadow-[0_0_8px_rgba(217,122,63,0.2)] motion-safe:group-focus-visible:translate-x-1 motion-safe:group-focus-visible:scale-[1.04] shrink-0 ${
+                isSettingsOpen
+                  ? 'bg-accent-primary/20 border border-accent-primary/40 text-accent-primary shadow-[0_0_8px_rgba(217,122,63,0.18)]'
+                  : 'bg-surface-2/70 border border-border/70 text-text-muted motion-safe:group-hover:bg-surface-2 motion-safe:group-hover:text-accent-primary'
+              }`}
+            >
+              <svg className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.05] motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </span>
+            <AmberUnderlineWrapper
+              active={isSettingsOpen}
+              className="transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-0.5 motion-safe:group-focus-visible:translate-x-0.5"
+            >
               <span>Settings</span>
             </AmberUnderlineWrapper>
-          </Link>
+          </button>
         </div>
       </div>
     </aside>

@@ -129,6 +129,12 @@ export const mockCommandPaletteItems: CommandPaletteItem[] = [
     category: 'COMMANDS',
     shortcut: '⌘M',
   },
+  {
+    id: 'cmd-act-settings',
+    title: 'Open Preferences & Settings',
+    category: 'COMMANDS',
+    shortcut: '⌘,',
+  },
 ]
 
 export const mockSuggestionCards: SuggestionCardData[] = [

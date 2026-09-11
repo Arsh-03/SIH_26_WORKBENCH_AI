@@ -4,17 +4,20 @@ import { motion } from 'framer-motion'
 import { FilmGrain } from './FilmGrain'
 import { Sidebar } from './Sidebar'
 import { CommandPalette } from './CommandPalette'
+import { SettingsPage } from '../../routes/SettingsPage'
 import { useWorkbench } from '../../lib/WorkbenchContext'
 
 /**
  * AppLayout
  * Persistent layout wrapper housing the film-grain overlay,
- * the Sidebar navigation, global Command Palette (⌘K), and outlet for active routes.
+ * the Sidebar navigation, global Command Palette (⌘K), Settings Modal (⌘,), and outlet for active routes.
  */
 export const AppLayout: React.FC = () => {
   const {
     isCmdPaletteOpen,
     setIsCmdPaletteOpen,
+    isSettingsOpen,
+    closeSettings,
     resetToNewChat,
     isSidebarOpen,
   } = useWorkbench()
@@ -51,6 +54,13 @@ export const AppLayout: React.FC = () => {
       <CommandPalette
         isOpen={isCmdPaletteOpen}
         onClose={() => setIsCmdPaletteOpen(false)}
+      />
+
+      {/* Settings Modal Overlay on top of Workbench */}
+      <SettingsPage
+        isOpen={isSettingsOpen}
+        onClose={closeSettings}
+        isModal={true}
       />
 
       {/* Main content area */}

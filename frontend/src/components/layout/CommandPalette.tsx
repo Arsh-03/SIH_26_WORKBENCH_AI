@@ -35,6 +35,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     resetToNewChat,
     sendMessage,
     activeArtifact,
+    openSettings,
   } = useWorkbench()
 
   const [query, setQuery] = useState('')
@@ -130,6 +131,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     if (item.id === 'cmd-act-3') {
       navigate('/')
       sendMessage('Generate a Postgres migration script adding BRIN indexing on block range pages for high-throughput time-series event tables.')
+      onClose()
+      return
+    }
+
+    if (item.id === 'cmd-act-settings' || item.title.toLowerCase().includes('setting') || item.title.toLowerCase().includes('preference')) {
+      openSettings()
       onClose()
       return
     }

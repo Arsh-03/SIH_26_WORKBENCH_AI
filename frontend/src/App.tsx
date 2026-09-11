@@ -6,8 +6,16 @@ import { ChatPage } from './routes/ChatPage'
 import { ChatsPage } from './routes/ChatsPage'
 import { ProjectsPage } from './routes/ProjectsPage'
 import { LibraryPage } from './routes/LibraryPage'
-import { SettingsPage } from './routes/SettingsPage'
 import { DevPreviewPage } from './routes/DevPreviewPage'
+import { useWorkbench } from './lib/WorkbenchContext'
+
+const SettingsRouteRedirect: React.FC = () => {
+  const { openSettings } = useWorkbench()
+  React.useEffect(() => {
+    openSettings()
+  }, [openSettings])
+  return <Navigate to="/" replace />
+}
 
 export const App: React.FC = () => {
   return (
@@ -21,7 +29,7 @@ export const App: React.FC = () => {
             <Route path="/chats" element={<ChatsPage />} />
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/library" element={<LibraryPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings" element={<SettingsRouteRedirect />} />
             <Route path="/dev-preview" element={<DevPreviewPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
