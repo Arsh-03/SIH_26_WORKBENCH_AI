@@ -7,6 +7,7 @@ import { ChatPage } from './routes/ChatPage'
 import { ChatsPage } from './routes/ChatsPage'
 import { ProjectsPage } from './routes/ProjectsPage'
 import { LibraryPage } from './routes/LibraryPage'
+import { CompanyDocsPage } from './routes/CompanyDocsPage'
 import { DevPreviewPage } from './routes/DevPreviewPage'
 import { LoginPage } from './routes/LoginPage'
 
@@ -63,6 +64,7 @@ export const App: React.FC = () => {
               <Route path="/chats" element={<ChatsPage />} />
               <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/library" element={<LibraryPage />} />
+              <Route path="/company-docs" element={<CompanyDocsPage />} />
               <Route path="/settings" element={<SettingsRouteRedirect />} />
               <Route path="/dev-preview" element={<DevPreviewPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />

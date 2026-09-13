@@ -391,7 +391,8 @@ export const InputBar: React.FC<InputBarProps> = ({
 
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault()
-    if (isStreaming) {
+    // If streaming and input is empty, treat as stop generation request
+    if (isStreaming && !inputText.trim()) {
       onStopStreaming?.()
       return
     }
@@ -864,69 +865,100 @@ export const InputBar: React.FC<InputBarProps> = ({
             </button>
           </div>
 
-          {/* Send Button: Solid Darkroom Amber Square with morph-to-stop */}
-          <motion.button
-            type="button"
-            onClick={() => handleSubmit()}
-            animate={{
-              scale: isSendFlashing ? 0.94 : 1,
-              filter: isSendFlashing ? 'brightness(1.3)' : 'brightness(1)',
-              backgroundColor: isSendFlashing ? '#F5A66B' : '#D97A3F',
-            }}
-            transition={{ duration: 0.12, ease: 'easeOut' }}
-            disabled={!inputText.trim() && !isStreaming}
-            className={`relative flex h-8 w-8 items-center justify-center rounded-[2px] bg-accent-primary text-background font-bold transition-opacity cursor-pointer ${
-              !inputText.trim() && !isStreaming ? 'opacity-40 cursor-not-allowed' : 'hover:brightness-110'
-            }`}
-            title={isStreaming ? 'Stop generation' : 'Send message (Enter)'}
-          >
-            <div className="relative flex items-center justify-center w-4 h-4">
-              {/* Morphing Stem / Stop Square */}
-              <motion.span
-                initial={false}
-                animate={
-                  isStreaming
-                    ? {
-                        width: 10,
-                        height: 10,
-                        borderRadius: 1.5,
-                        y: 0,
-                      }
-                    : {
-                        width: 2.5,
-                        height: 12,
-                        borderRadius: 1,
-                        y: 1,
-                      }
-                }
-                transition={{ duration: 0.18, ease: 'easeOut' }}
-                className="absolute bg-background pointer-events-none"
-              />
-              {/* Morphing Arrowhead / Chevron */}
-              <motion.span
-                initial={false}
-                animate={
-                  isStreaming
-                    ? {
-                        width: 0,
-                        height: 0,
-                        scale: 0,
-                        opacity: 0,
-                        y: 0,
-                      }
-                    : {
-                        width: 7,
-                        height: 7,
-                        scale: 1,
-                        opacity: 1,
-                        y: -2.5,
-                      }
-                }
-                transition={{ duration: 0.15, ease: 'easeOut' }}
-                className="absolute border-t-[2.5px] border-l-[2.5px] border-background rotate-45 pointer-events-none"
-              />
-            </div>
-          </motion.button>
+          {/* Send / Queue / Stop Button */}
+          {isStreaming && inputText.trim() ? (
+            <motion.button
+              type="button"
+              onClick={() => handleSubmit()}
+              animate={{
+                scale: isSendFlashing ? 0.94 : 1,
+                filter: isSendFlashing ? 'brightness(1.3)' : 'brightness(1)',
+                backgroundColor: isSendFlashing ? '#F5A66B' : '#D97A3F',
+              }}
+              transition={{ duration: 0.12, ease: 'easeOut' }}
+              className="relative flex h-8 px-2.5 items-center justify-center gap-1 rounded-[2px] bg-accent-primary text-background font-mono font-bold text-[11px] shadow-sm hover:brightness-110 transition-all cursor-pointer"
+              title="Add to queue (Enter)"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              <span>Queue</span>
+            </motion.button>
+          ) : (
+            <motion.button
+              type="button"
+              onClick={() => handleSubmit()}
+              animate={{
+                scale: isSendFlashing ? 0.94 : 1,
+                filter: isSendFlashing ? 'brightness(1.3)' : 'brightness(1)',
+                backgroundColor: isSendFlashing ? '#F5A66B' : '#D97A3F',
+              }}
+              transition={{ duration: 0.12, ease: 'easeOut' }}
+              disabled={!inputText.trim() && !isStreaming}
+              className={`relative flex h-8 w-8 items-center justify-center rounded-[2px] bg-accent-primary text-background font-bold transition-opacity cursor-pointer ${
+                !inputText.trim() && !isStreaming ? 'opacity-40 cursor-not-allowed' : 'hover:brightness-110'
+              }`}
+              title={isStreaming ? 'Stop generation' : 'Send message (Enter)'}
+            >
+              <div className="relative flex items-center justify-center w-4 h-4">
+                {/* Morphing Stem / Stop Square */}
+                <motion.span
+                  initial={false}
+                  animate={
+                    isStreaming
+                      ? {
+                          width: 10,
+                          height: 10,
+                          borderRadius: 1.5,
+                          y: 0,
+                        }
+                      : {
+                          width: 2.5,
+                          height: 12,
+                          borderRadius: 1,
+                          y: 1,
+                        }
+                  }
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="absolute bg-background pointer-events-none"
+                />
+                {/* Morphing Arrowhead / Chevron */}
+                <motion.span
+                  initial={false}
+                  animate={
+                    isStreaming
+                      ? {
+                          width: 0,
+                          height: 0,
+                          scale: 0,
+                          opacity: 0,
+                          y: 0,
+                        }
+                      : {
+                          width: 7,
+                          height: 7,
+                          scale: 1,
+                          opacity: 1,
+                          y: -2.5,
+                        }
+                  }
+                  transition={{ duration: 0.15, ease: 'easeOut' }}
+                  className="absolute border-t-[2.5px] border-l-[2.5px] border-background rotate-45 pointer-events-none"
+                />
+              </div>
+            </motion.button>
+          )}
         </div>
       </div>
     </div>

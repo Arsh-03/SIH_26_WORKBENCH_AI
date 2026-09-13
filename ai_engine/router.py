@@ -113,10 +113,18 @@ class DynamicModelRouter:
         if has_images or any(kw in prompt_clean for kw in ["image", "photo", "diagram", "schematic", "ocr", "chart", "blueprint"]):
             return ModelCapability.VISION_OCR, "Prompt contains vision/diagram OCR inspection criteria"
 
-        # 2. Document synthesis, formal reporting, Word (.docx) or code specification documentation
-        doc_keywords = ["doc", "document", "docx", "memo", "sop", "spec", "specification", "manual", "procedure", "report", "draft", "save as doc", "save the output", "save in doc"]
-        if (active_document_ids and len(active_document_ids) > 0) or any(kw in prompt_clean for kw in doc_keywords):
-            return ModelCapability.DOCUMENT_CREATION, "Prompt requests formal document creation, technical specification, or SOP synthesis"
+        # 2. Check for explicit document creation/drafting/export requests
+        is_question = any(prompt_clean.startswith(qw) for qw in [
+            "what", "how", "why", "when", "where", "who", "which", "is ", "are ", 
+            "can ", "could ", "do ", "does ", "tell me", "explain", "describe", "show me", "list"
+        ]) or prompt_clean.endswith("?")
+
+        doc_create_verbs = ["create", "generate", "draft", "compile", "build", "write", "export", "save as", "produce", "make a"]
+        doc_create_nouns = ["doc", "document", "docx", "word doc", "formal report", "written memo", "full sop"]
+        is_explicit_doc_creation = (any(v in prompt_clean for v in doc_create_verbs) and any(n in prompt_clean for n in doc_create_nouns)) or any(phrase in prompt_clean for phrase in ["save as doc", "save the output", "save in doc", "generate doc", "create doc", "draft report", "export to docx", "save as word"])
+
+        if is_explicit_doc_creation and not is_question:
+            return ModelCapability.DOCUMENT_CREATION, "Prompt explicitly requests formal document creation or Word (.docx) report synthesis"
 
         # 3. Code execution & software engineering
         code_keywords = [
@@ -135,8 +143,8 @@ class DynamicModelRouter:
         if any(kw in prompt_clean for kw in math_keywords):
             return ModelCapability.MATH_REASONING, "Prompt requires rigorous mathematical derivation and formula calculations"
 
-        # 5. General dialogue / greeting fallback
-        return ModelCapability.GENERAL_CHAT, "General conversational prompt routed to standard dialogue model"
+        # 5. General dialogue / Knowledge Q&A fallback
+        return ModelCapability.GENERAL_CHAT, "Conversational / Technical knowledge prompt routed to standard dialogue model"
 
     async def classify_capability_llm(
         self,
@@ -160,11 +168,11 @@ class DynamicModelRouter:
             system_prompt = (
                 "You are an AI Intent Router for an Engineering Workbench. "
                 "Classify the user prompt into exactly ONE of the following capability categories:\n"
-                "- document_creation: The user wants to create, draft, generate, or compile a document, formal report, Word (.docx) file, memo, SOP, or technical code specification (even if code/explanation is included in the document).\n"
+                "- document_creation: The user EXPLICITLY commands creating, drafting, exporting, or compiling a formal document, report, Word (.docx) file, memo, or SOP. (CRITICAL: Do NOT choose this for simple questions, technical lookups, or inquiries asking 'what are...', 'how does...', etc.)\n"
                 "- coding: The user wants pure executable code, script, bug fix, algorithm implementation, or refactoring in a programming language.\n"
                 "- math_reasoning: The user wants mathematical derivations, calculations, physics formulas, or equation solving.\n"
                 "- vision_ocr: The user wants image, diagram, blueprint, or OCR analysis.\n"
-                "- general_chat: General conversation, greeting, conceptual explanation, or general knowledge inquiry.\n\n"
+                "- general_chat: General conversation, greeting, conceptual inquiry, technical standards Q&A, inspection intervals lookup, SOP questions, or knowledge retrieval.\n\n"
                 "Respond ONLY with a valid JSON object in this exact format: {\"capability\": \"<category>\", \"reason\": \"<brief 1-sentence reason>\"}"
             )
 

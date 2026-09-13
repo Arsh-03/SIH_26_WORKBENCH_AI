@@ -59,6 +59,12 @@ export interface SuggestionCardData {
   actionLabel: string
 }
 
+export interface QueuedMessage {
+  id: string
+  text: string
+  timestamp: string
+}
+
 export interface ScopeFile {
   id: string
   name: string
@@ -99,6 +105,14 @@ export interface ArtifactData {
   terminalCommand?: string
 }
 
+export interface ChatCitationItem {
+  document_id: string
+  chunk_id?: string
+  page_number?: number
+  snippet: string
+  content?: string
+}
+
 export interface ChatMessage {
   id: string
   sender: 'user' | 'model'
@@ -109,6 +123,7 @@ export interface ChatMessage {
   routingReason?: string
   thinkingDuration?: string
   thinkingSteps?: string[]
+  citations?: ChatCitationItem[]
   artifact?: ArtifactData
 }
 

@@ -171,5 +171,66 @@ class DocumentIngestionService:
         await db.commit()
         return len(chunks_data)
 
+    async def initialize_company_documents(self, db: AsyncSession) -> int:
+        """
+        Auto-ingest official company blueprints & SOPs from storage/company_documents into company_shared workspace.
+        """
+        company_dir = os.path.join(settings.STORAGE_DIR, "company_documents")
+        if not os.path.exists(company_dir):
+            os.makedirs(company_dir, exist_ok=True)
+            return 0
+
+        files = [f for f in os.listdir(company_dir) if os.path.isfile(os.path.join(company_dir, f))]
+        ingested_count = 0
+
+        # Ensure company_shared workspace exists in SQLite DB
+        from backend.app.models.sql_models import Workspace
+        ws = await db.get(Workspace, "company_shared")
+        if not ws:
+            ws = Workspace(
+                id="company_shared",
+                name="Company Official Knowledge Base",
+                description="Official company SOPs, blueprints, and safety policies"
+            )
+            db.add(ws)
+            await db.commit()
+
+        for filename in files:
+            filepath = os.path.join(company_dir, filename)
+            doc_id = f"company_doc_{filename.replace('.', '_')}"
+            
+            # Check if document already ingested
+            existing_doc = await db.get(Document, doc_id)
+            if existing_doc and existing_doc.status == "indexed":
+                continue
+
+            file_ext = os.path.splitext(filename)[1].lstrip(".") or "markdown"
+            
+            if not existing_doc:
+                doc_record = Document(
+                    id=doc_id,
+                    workspace_id="company_shared",
+                    filename=filename,
+                    filepath=filepath,
+                    file_type=file_ext,
+                    classification="official_company",
+                    status="processing"
+                )
+                db.add(doc_record)
+                await db.commit()
+
+            chunks_indexed = await self.process_and_index_document(
+                document_id=doc_id,
+                workspace_id="company_shared",
+                filepath=filepath,
+                filename=filename,
+                file_type=file_ext,
+                db=db
+            )
+            ingested_count += chunks_indexed
+            logger.info(f"Ingested company document '{filename}' into company_shared vector collection ({chunks_indexed} chunks).")
+
+        return ingested_count
+
 
 ingestion_service = DocumentIngestionService()

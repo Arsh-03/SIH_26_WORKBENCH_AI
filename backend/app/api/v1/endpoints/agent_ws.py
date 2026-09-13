@@ -61,25 +61,31 @@ async def agent_websocket_endpoint(websocket: WebSocket, session_id: str):
                         db_session.add(ws)
                         await db_session.commit()
 
+                    from backend.app.services.chat_title_service import clean_heuristic_title, generate_ai_chat_title
+
+                    initial_title = clean_heuristic_title(run_req.prompt)
+
                     sess = await db_session.get(AgentSession, session_id)
                     if not sess:
                         sess = AgentSession(
                             id=session_id,
                             workspace_id=run_req.workspace_id,
-                            title=run_req.prompt[:50]
+                            title=initial_title
                         )
                         db_session.add(sess)
+                        await db_session.commit()
+                    elif sess.title and (sess.title.endswith("…") or sess.title.endswith("...") or sess.title.lower().startswith("what are the")):
+                        sess.title = initial_title
                         await db_session.commit()
 
                     # Ensure DBChatSession exists
                     chat_sess = await db_session.get(DBChatSession, session_id)
-                    title_text = run_req.prompt[:38] + ("…" if len(run_req.prompt) > 38 else "")
                     if not chat_sess:
                         chat_sess = DBChatSession(
                             id=session_id,
                             user_id=user_id,
                             workspace_id=run_req.workspace_id,
-                            title=title_text,
+                            title=initial_title,
                             preview=run_req.prompt[:80],
                             model="llama3.1:8b",
                             created_at=datetime.datetime.utcnow(),
@@ -90,20 +96,34 @@ async def agent_websocket_endpoint(websocket: WebSocket, session_id: str):
                     else:
                         if user_id and not chat_sess.user_id:
                             chat_sess.user_id = user_id
+                        # Heal past truncated titles
+                        if not chat_sess.title or chat_sess.title.endswith("…") or chat_sess.title.endswith("...") or chat_sess.title.lower().startswith("what are the"):
+                            chat_sess.title = initial_title
                         chat_sess.updated_at = datetime.datetime.utcnow()
                         await db_session.commit()
 
-                    # Save user message to DBChatMessage
-                    user_msg = DBChatMessage(
-                        id=f"user_{uuid.uuid4().hex[:12]}",
-                        session_id=session_id,
-                        sender="user",
-                        text=run_req.prompt,
-                        timestamp_label=datetime.datetime.utcnow().strftime("%I:%M %p"),
-                        created_at=datetime.datetime.utcnow(),
+                    # Save user message to DBChatMessage only if not identical to the most recent message
+                    from sqlalchemy import select
+                    last_msg_stmt = (
+                        select(DBChatMessage)
+                        .where(DBChatMessage.session_id == session_id)
+                        .order_by(DBChatMessage.created_at.desc())
+                        .limit(1)
                     )
-                    db_session.add(user_msg)
-                    await db_session.commit()
+                    last_res = await db_session.execute(last_msg_stmt)
+                    last_db_msg = last_res.scalars().first()
+
+                    if not last_db_msg or last_db_msg.sender != "user" or last_db_msg.text != run_req.prompt:
+                        user_msg = DBChatMessage(
+                            id=f"user_{uuid.uuid4().hex[:12]}",
+                            session_id=session_id,
+                            sender="user",
+                            text=run_req.prompt,
+                            timestamp_label=datetime.datetime.utcnow().strftime("%I:%M %p"),
+                            created_at=datetime.datetime.utcnow(),
+                        )
+                        db_session.add(user_msg)
+                        await db_session.commit()
 
                     collected_thoughts = []
 
@@ -139,6 +159,25 @@ async def agent_websocket_endpoint(websocket: WebSocket, session_id: str):
                                     chat_sess.preview = frame_dict.get("content", "")[:80]
                                     chat_sess.updated_at = datetime.datetime.utcnow()
                                 await db_session.commit()
+
+                                # Generate AI-refined chat title
+                                try:
+                                    refined_title = await generate_ai_chat_title(
+                                        prompt=run_req.prompt,
+                                        response_snippet=frame_dict.get("content", "")[:250]
+                                    )
+                                    if refined_title and chat_sess and refined_title != chat_sess.title:
+                                        chat_sess.title = refined_title
+                                        if sess:
+                                            sess.title = refined_title
+                                        await db_session.commit()
+                                        await websocket.send_json({
+                                            "event": "chat_renamed",
+                                            "session_id": session_id,
+                                            "title": refined_title
+                                        })
+                                except Exception as title_err:
+                                    logger.debug(f"AI title generation error: {title_err}")
                             except Exception as save_err:
                                 logger.error(f"Failed to auto-save model answer to DB: {save_err}")
 

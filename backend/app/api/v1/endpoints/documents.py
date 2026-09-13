@@ -5,13 +5,20 @@ from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from backend.app.config import settings
 from backend.app.database import get_db, AsyncSessionLocal
 from backend.app.models.sql_models import Workspace, Document, DocumentChunk
-from backend.app.models.schemas import DocumentUploadResponse, DocumentStatusResponse, DocumentItem
+from backend.app.models.schemas import (
+    DocumentUploadResponse,
+    DocumentStatusResponse,
+    DocumentItem,
+    DocumentContentResponse,
+    DocumentUpdateRequest
+)
 from backend.app.core.security import generate_id, sanitize_filename
 from backend.app.services.ingestion_service import ingestion_service
+from backend.app.services.vector_store import vector_store_service
 
 router = APIRouter()
 
@@ -163,3 +170,167 @@ async def list_workspace_documents(workspace_id: str, db: AsyncSession = Depends
         )
         for d in docs
     ]
+
+@router.get("/{workspace_id}/documents/{document_id}/content", response_model=DocumentContentResponse)
+async def get_document_content(workspace_id: str, document_id: str, db: AsyncSession = Depends(get_db)):
+    """Fetch the raw text or markdown content of a document."""
+    doc = await db.get(Document, document_id)
+    if not doc or doc.workspace_id != workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found in workspace")
+
+    content_str = ""
+    if doc.filepath and os.path.exists(doc.filepath):
+        try:
+            with open(doc.filepath, "r", encoding="utf-8", errors="replace") as f:
+                content_str = f.read()
+        except Exception as e:
+            content_str = f"[Error reading file: {str(e)}]"
+
+    # Chunk count
+    res = await db.execute(select(DocumentChunk).where(DocumentChunk.document_id == document_id))
+    chunks = res.scalars().all()
+    chunk_count = len(chunks) or doc.chunk_count
+
+    return DocumentContentResponse(
+        document_id=doc.id,
+        workspace_id=doc.workspace_id,
+        filename=doc.filename,
+        file_type=doc.file_type,
+        content=content_str,
+        chunk_count=chunk_count,
+        status=doc.status
+    )
+
+@router.put("/{workspace_id}/documents/{document_id}", response_model=DocumentStatusResponse)
+async def update_document_content(
+    workspace_id: str,
+    document_id: str,
+    payload: DocumentUpdateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update document content, overwrite file on disk, purge old vectors and re-index dynamically."""
+    doc = await db.get(Document, document_id)
+    if not doc or doc.workspace_id != workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found in workspace")
+
+    if payload.filename:
+        doc.filename = sanitize_filename(payload.filename)
+    if payload.classification:
+        doc.classification = payload.classification
+
+    # Write updated content to disk
+    if doc.filepath:
+        os.makedirs(os.path.dirname(doc.filepath), exist_ok=True)
+        with open(doc.filepath, "w", encoding="utf-8") as f:
+            f.write(payload.content)
+
+    # 1. Purge existing chunks from ChromaDB
+    await vector_store_service.delete_document_chunks(workspace_id=workspace_id, document_id=document_id)
+
+    # 2. Purge existing chunk rows from SQL DB
+    await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document_id))
+    await db.commit()
+
+    # 3. Synchronously re-index the document content
+    try:
+        await ingestion_service.process_and_index_document(
+            document_id=doc.id,
+            workspace_id=workspace_id,
+            filepath=doc.filepath,
+            filename=doc.filename,
+            file_type=doc.file_type,
+            db=db
+        )
+    except Exception as e:
+        doc.status = "failed"
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Re-indexing failed: {str(e)}")
+
+    # Fetch updated info
+    res = await db.execute(select(DocumentChunk).where(DocumentChunk.document_id == document_id))
+    chunks = res.scalars().all()
+    total_chunks = len(chunks)
+    total_pages = max([c.page_number for c in chunks if c.page_number] or [1])
+
+    return DocumentStatusResponse(
+        document_id=doc.id,
+        workspace_id=doc.workspace_id,
+        status="indexed",
+        total_pages=total_pages,
+        total_chunks=total_chunks,
+        embedding_model=settings.EMBEDDING_MODEL.split(":")[0],
+        vector_dimensions=settings.EMBEDDING_DIMENSIONS,
+        completed_at=datetime.datetime.utcnow().isoformat() + "Z"
+    )
+
+@router.delete("/{workspace_id}/documents/{document_id}")
+async def delete_document(workspace_id: str, document_id: str, db: AsyncSession = Depends(get_db)):
+    """Delete a document from workspace, removing disk file, SQL records, and Chroma vectors."""
+    doc = await db.get(Document, document_id)
+    if not doc or doc.workspace_id != workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found in workspace")
+
+    # 1. Delete Chroma vectors
+    await vector_store_service.delete_document_chunks(workspace_id=workspace_id, document_id=document_id)
+
+    # 2. Delete DB chunks
+    await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document_id))
+
+    # 3. Delete DB document record
+    await db.delete(doc)
+    await db.commit()
+
+    # 4. Remove file from disk
+    if doc.filepath and os.path.exists(doc.filepath):
+        try:
+            os.remove(doc.filepath)
+        except OSError:
+            pass
+
+    return {"status": "deleted", "document_id": document_id, "workspace_id": workspace_id}
+
+@router.post("/{workspace_id}/documents/{document_id}/reindex", response_model=DocumentStatusResponse)
+async def reindex_document(workspace_id: str, document_id: str, db: AsyncSession = Depends(get_db)):
+    """Manually trigger re-indexing of an existing document."""
+    doc = await db.get(Document, document_id)
+    if not doc or doc.workspace_id != workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found in workspace")
+
+    if not doc.filepath or not os.path.exists(doc.filepath):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Underlying document file not found on disk")
+
+    # Purge old vectors and chunk records
+    await vector_store_service.delete_document_chunks(workspace_id=workspace_id, document_id=document_id)
+    await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document_id))
+    await db.commit()
+
+    try:
+        await ingestion_service.process_and_index_document(
+            document_id=doc.id,
+            workspace_id=workspace_id,
+            filepath=doc.filepath,
+            filename=doc.filename,
+            file_type=doc.file_type,
+            db=db
+        )
+    except Exception as e:
+        doc.status = "failed"
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Re-indexing failed: {str(e)}")
+
+    res = await db.execute(select(DocumentChunk).where(DocumentChunk.document_id == document_id))
+    chunks = res.scalars().all()
+    total_chunks = len(chunks)
+    total_pages = max([c.page_number for c in chunks if c.page_number] or [1])
+
+    return DocumentStatusResponse(
+        document_id=doc.id,
+        workspace_id=doc.workspace_id,
+        status="indexed",
+        total_pages=total_pages,
+        total_chunks=total_chunks,
+        embedding_model=settings.EMBEDDING_MODEL.split(":")[0],
+        vector_dimensions=settings.EMBEDDING_DIMENSIONS,
+        completed_at=datetime.datetime.utcnow().isoformat() + "Z"
+    )
+

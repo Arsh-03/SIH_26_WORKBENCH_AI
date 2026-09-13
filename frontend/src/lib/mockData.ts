@@ -18,6 +18,7 @@ export const mockNavItems: NavItem[] = [
   { id: 'chats', label: 'Chats', to: '/chats', count: '24' },
   { id: 'projects', label: 'Projects', to: '/projects', count: '05' },
   { id: 'library', label: 'Library', to: '/library', count: '18' },
+  { id: 'company-docs', label: 'Company Docs', to: '/company-docs', count: 'KB' },
 ]
 
 export const mockPinnedProjects: PinnedProject[] = [

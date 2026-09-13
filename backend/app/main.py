@@ -21,6 +21,17 @@ async def lifespan(app: FastAPI):
     settings.ensure_directories()
     await init_db()
     logger.info("Database schemas initialized successfully.")
+
+    try:
+        from backend.app.database import AsyncSessionLocal
+        from backend.app.services.ingestion_service import ingestion_service
+        async with AsyncSessionLocal() as session:
+            ingested = await ingestion_service.initialize_company_documents(session)
+            if ingested > 0:
+                logger.info(f"Company Knowledge Base initialized with {ingested} chunks.")
+    except Exception as e:
+        logger.warning(f"Company document auto-ingestion warning: {e}")
+
     yield
     logger.info("Shutting down Sovereign Gateway.")
 

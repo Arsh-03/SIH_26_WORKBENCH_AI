@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import type { ChatMessage, ArtifactData, ScopeFile, ChatSession } from './types'
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
+import type { ChatMessage, ArtifactData, ScopeFile, ChatSession, QueuedMessage } from './types'
 import { mockArtifactData } from './mockData'
 import { simulateModelResponse } from './simulateAi'
 import { api } from './api'
@@ -12,6 +12,52 @@ export interface ActiveToolsState {
   deepResearch: boolean
 }
 
+export function generateCleanChatTitle(prompt: string): string {
+  if (!prompt) return 'New Conversation'
+  let text = prompt.replace(/[`*_#~>\[\]]/g, ' ').trim()
+  text = text.replace(/\s+/g, ' ')
+  text = text.replace(/[\.…]+$/, '').trim()
+
+  const lower = text.toLowerCase()
+  if (lower.includes('temperature control') || (lower.includes('temperature') && lower.includes('regulation'))) {
+    return 'Temperature Control Regulations'
+  }
+  if (lower.includes('mandatory inspection') || (lower.includes('inspection') && lower.includes('interval'))) {
+    return 'Inspection Intervals & Compliance'
+  }
+  if (lower.includes('asme section viii') || (lower.includes('asme') && lower.includes('pressure'))) {
+    return 'ASME Pressure Vessel Specs'
+  }
+  if (lower.includes('sop-401') || (lower.includes('boiler') && lower.includes('maintenance'))) {
+    return 'SOP-401 Boiler Maintenance'
+  }
+  if (lower.includes('safety') && lower.includes('air-gap')) {
+    return 'Air-Gap & Safety Policy'
+  }
+  if (lower.includes('mawp') || lower.includes('working pressure')) {
+    return 'Pressure Vessel MAWP Limits'
+  }
+
+  const prefixes = [
+    /^(?:can you|could you|please|kindly)\s+(?:help me\s+)?(?:to\s+)?(?:explain|show|tell me|give me|write|find|calculate|check|list|detail|summarize)\s+(?:about\s+|on\s+)?/i,
+    /^(?:what|where|when|why|how|which|who)\s+(?:is|are|was|were|do|does|did|can|should|would|to)\s+(?:the\s+|a\s+|an\s+)?/i,
+    /^(?:tell me about|explain|describe|show me|give me|list)\s+(?:the\s+|a\s+|an\s+)?/i,
+    /^(?:i want to|i need to|i would like to)\s+(?:know|understand|see|find|check)\s+(?:about\s+|on\s+)?/i,
+  ]
+  for (const p of prefixes) {
+    text = text.replace(p, '').trim()
+  }
+
+  text = text.replace(/[\?\.\!]+$/, '').trim()
+  text = text.replace(/\s+(?:of the company|in our company|for our company|for the company|please)$/i, '').trim()
+
+  const words = text.split(' ').filter(Boolean)
+  const chosen = words.slice(0, 5)
+  if (chosen.length === 0) return 'Engineering Inquiry'
+
+  return chosen.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+}
+
 function loadSavedSessions(userId?: string): ChatSession[] {
   if (!userId) return []
   try {
@@ -19,7 +65,12 @@ function loadSavedSessions(userId?: string): ChatSession[] {
     if (raw) {
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed)) {
-        return parsed
+        return parsed.map((s: ChatSession) => {
+          if (!s.title || s.title === 'New Conversation' || s.title.endsWith('…') || s.title.endsWith('...') || s.title.toLowerCase().startsWith('what are the') || s.title.toLowerCase().startsWith('can you') || s.title.toLowerCase().startsWith('what is')) {
+            return { ...s, title: generateCleanChatTitle(s.preview || s.title || '') }
+          }
+          return s
+        })
       }
     }
   } catch (e) {
@@ -48,6 +99,13 @@ export interface WorkbenchContextType {
   sendMessage: (text: string) => Promise<void>
   stopStreaming: () => void
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>
+
+  // Message Queuing System & HITL Suspension
+  queuedMessages: QueuedMessage[]
+  isQueuePausedForHITL: boolean
+  removeFromQueue: (id: string) => void
+  clearQueue: () => void
+  resumeQueue: () => void
 
   // Artifact State
   activeArtifact: ArtifactData | null
@@ -101,6 +159,11 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [isStreaming, setIsStreaming] = useState(false)
   const [currentThinking, setCurrentThinking] = useState<{ duration: string; steps: string[] } | null>(null)
   const [abortController, setAbortController] = useState<AbortController | null>(null)
+  const isStreamingRef = useRef(false)
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([])
+  const queuedMessagesRef = useRef<QueuedMessage[]>([])
+  const [isQueuePausedForHITL, setIsQueuePausedForHITL] = useState(false)
+  const isQueuePausedRef = useRef(false)
 
   const [activeArtifact, setActiveArtifact] = useState<ArtifactData | null>(null)
   const [isArtifactOpen, setIsArtifactOpen] = useState(false)
@@ -277,8 +340,27 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setActiveArtifact(null)
     setIsArtifactOpen(false)
     setScopeFiles([])
+    isStreamingRef.current = false
+    queuedMessagesRef.current = []
+    setQueuedMessages([])
+    setIsQueuePausedForHITL(false)
+    isQueuePausedRef.current = false
     setIsStreaming(false)
     setCurrentThinking(null)
+  }, [])
+
+  // Remove single message from queue
+  const removeFromQueue = useCallback((id: string) => {
+    queuedMessagesRef.current = queuedMessagesRef.current.filter((m) => m.id !== id)
+    setQueuedMessages([...queuedMessagesRef.current])
+  }, [])
+
+  // Clear entire message queue
+  const clearQueue = useCallback(() => {
+    queuedMessagesRef.current = []
+    setQueuedMessages([])
+    setIsQueuePausedForHITL(false)
+    isQueuePausedRef.current = false
   }, [])
 
   // Delete a chat session from SQLite DB & state
@@ -330,6 +412,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       abortController.abort()
       setAbortController(null)
     }
+    isStreamingRef.current = false
     setIsStreaming(false)
     setCurrentThinking(null)
   }, [abortController])
@@ -337,6 +420,25 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   // Send message with live Backend WebSocket streaming + SQLite persistence + fallback
   const sendMessage = useCallback(
     async (text: string) => {
+      // Any new user prompt or choice clears HITL queue pause
+      if (isQueuePausedRef.current) {
+        isQueuePausedRef.current = false
+        setIsQueuePausedForHITL(false)
+      }
+
+      // If streaming is already in progress, enqueue message to avoid parallel collision/repetitive responses
+      if (isStreamingRef.current) {
+        const queuedItem: QueuedMessage = {
+          id: `queue_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          text,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        }
+        queuedMessagesRef.current = [...queuedMessagesRef.current, queuedItem]
+        setQueuedMessages([...queuedMessagesRef.current])
+        return
+      }
+
+      isStreamingRef.current = true
       const userMsg: ChatMessage = {
         id: `user-${Date.now()}`,
         sender: 'user',
@@ -357,11 +459,6 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const sessionId = currentChatId || `sess_${Date.now()}`
       if (!currentChatId) setCurrentChatId(sessionId)
 
-      // Background persist user message to SQLite DB
-      api.saveChatMessage(sessionId, userMsg).catch((e) => {
-        console.warn('Async SQLite user message save fallback:', e)
-      })
-
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const wsUrl = `${protocol}//${window.location.host}/api/v1/agents/ws/${sessionId}`
 
@@ -373,7 +470,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const persistExchange = (finalMessages: ChatMessage[]) => {
           setChatSessions((prev) => {
             const existingIdx = prev.findIndex((s) => s.id === sessionId)
-            const title = text.length > 38 ? text.slice(0, 38) + '…' : text
+            const title = generateCleanChatTitle(text)
             const lastMsg = finalMessages[finalMessages.length - 1]
             const preview = lastMsg?.text
               ? lastMsg.text.length > 80
@@ -495,6 +592,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                     liveSteps.length > 0
                       ? liveSteps
                       : ['Sovereign AI graph execution verified', 'Zero-egress audit trace recorded'],
+                  citations: frame.citations || undefined,
                   artifact: frame.artifact || undefined,
                 }
 
@@ -503,10 +601,12 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                   setIsArtifactOpen(true)
                 }
 
-                // Persist model response to SQLite
-                api.saveChatMessage(sessionId, modelMsg).catch((e) => {
-                  console.warn('Async SQLite model response save fallback:', e)
-                })
+                // Check for Human-In-The-Loop interactive options
+                const hasHITLOptions = /:::options\s*[\s\S]*?:::/i.test(frame.content || '')
+                if (hasHITLOptions) {
+                  setIsQueuePausedForHITL(true)
+                  isQueuePausedRef.current = true
+                }
 
                 setMessages((prev) => {
                   const updated = [...prev, modelMsg]
@@ -514,6 +614,15 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                   return updated
                 })
                 resolve()
+              } else if (frame.event === 'chat_renamed' && frame.title) {
+                const renamedTitle = frame.title
+                setChatSessions((prev) => {
+                  const updated = prev.map((s) =>
+                    s.id === (frame.session_id || sessionId) ? { ...s, title: renamedTitle } : s
+                  )
+                  saveSessions(user?.id, updated)
+                  return updated
+                })
               }
             } catch (err) {
               console.error('Failed to parse frame', err)
@@ -529,21 +638,16 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
           socket.onclose = () => {
             clearTimeout(timeoutTimer)
-            if (!receivedFinalAnswer && !wsActive) {
-              reject(new Error('WebSocket closed early'))
-            } else {
-              resolve()
+            if (!receivedFinalAnswer) {
+              reject(new Error('WebSocket closed before receiving response'))
             }
           }
         })
       } catch (wsErr) {
-        console.warn('Backend WebSocket unavailable, falling back to simulated inference:', wsErr)
+        console.warn('Agent WebSocket execution unavailable, falling back to simulated inference:', wsErr)
 
-        // Fallback to simulation
-        const response = await simulateModelResponse(text, {
-          activeTools,
-          scopeFiles: scopeFiles.map((s) => s.name),
-        })
+        // Fallback to simulateModelResponse
+        const response = await simulateModelResponse(text)
 
         const modelMsg: ChatMessage = {
           id: `model-${Date.now()}`,
@@ -560,6 +664,13 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setIsArtifactOpen(true)
         }
 
+        // Check for Human-In-The-Loop in fallback response
+        const hasHITLOptions = /:::options\s*[\s\S]*?:::/i.test(response.text || '')
+        if (hasHITLOptions) {
+          setIsQueuePausedForHITL(true)
+          isQueuePausedRef.current = true
+        }
+
         // Save fallback model answer to SQLite DB
         api.saveChatMessage(sessionId, modelMsg).catch((e) => {
           console.warn('Async SQLite fallback model save:', e)
@@ -568,7 +679,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setMessages((prev) => {
           const updated = [...prev, modelMsg]
           const existingIdx = chatSessions.findIndex((s) => s.id === sessionId)
-          const title = text.length > 38 ? text.slice(0, 38) + '…' : text
+          const title = generateCleanChatTitle(text)
           let updatedSessions: ChatSession[]
           if (existingIdx >= 0) {
             updatedSessions = chatSessions.map((s) =>
@@ -595,12 +706,37 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           return updated
         })
       } finally {
+        isStreamingRef.current = false
         setIsStreaming(false)
         setCurrentThinking(null)
+
+        // Process next queued message sequentially if not paused for HITL
+        if (!isQueuePausedRef.current && queuedMessagesRef.current.length > 0) {
+          const nextItem = queuedMessagesRef.current[0]
+          queuedMessagesRef.current = queuedMessagesRef.current.slice(1)
+          setQueuedMessages([...queuedMessagesRef.current])
+          setTimeout(() => {
+            sendMessage(nextItem.text)
+          }, 350)
+        }
       }
     },
     [activeTools, currentChatId, scopeFiles, chatSessions, user?.id]
   )
+
+  // Manually resume queue if held for HITL or user intervention
+  const resumeQueue = useCallback(() => {
+    setIsQueuePausedForHITL(false)
+    isQueuePausedRef.current = false
+    if (!isStreamingRef.current && queuedMessagesRef.current.length > 0) {
+      const nextItem = queuedMessagesRef.current[0]
+      queuedMessagesRef.current = queuedMessagesRef.current.slice(1)
+      setQueuedMessages([...queuedMessagesRef.current])
+      setTimeout(() => {
+        sendMessage(nextItem.text)
+      }, 50)
+    }
+  }, [sendMessage])
 
   // Listen for global ⌘K / Ctrl+K keyboard shortcut
   useEffect(() => {
@@ -624,6 +760,11 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         sendMessage,
         stopStreaming,
         setMessages,
+        queuedMessages,
+        isQueuePausedForHITL,
+        removeFromQueue,
+        clearQueue,
+        resumeQueue,
         activeArtifact,
         isArtifactOpen,
         openArtifact,

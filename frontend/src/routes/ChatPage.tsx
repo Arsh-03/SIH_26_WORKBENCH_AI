@@ -6,6 +6,7 @@ import { mockSuggestionCards } from '../lib/mockData'
 import { useWorkbench } from '../lib/WorkbenchContext'
 import { useAuth } from '../lib/AuthContext'
 import { InputBar } from '../components/chat/InputBar'
+import { QueueBar } from '../components/chat/QueueBar'
 import { MessageBlock } from '../components/chat/MessageBlock'
 import { ThinkingIndicator } from '../components/chat/ThinkingIndicator'
 import { PromptNavigator } from '../components/chat/PromptNavigator'
@@ -401,14 +402,20 @@ export const ChatPage: React.FC = () => {
                 className="flex-1 overflow-y-auto px-6 py-6 space-y-6"
               >
                 <div className="w-full max-w-3xl mx-auto space-y-6">
-                  {messages.map((msg) => (
-                    <MessageBlock
-                      key={msg.id}
-                      message={msg}
-                      onOpenArtifact={openArtifact}
-                      isArtifactOpen={isArtifactOpen}
-                    />
-                  ))}
+                  {(() => {
+                    const latestUserMsg = [...messages].reverse().find((m) => m.sender === 'user')
+                    return messages.map((msg) => (
+                      <MessageBlock
+                        key={msg.id}
+                        message={msg}
+                        onOpenArtifact={openArtifact}
+                        isArtifactOpen={isArtifactOpen}
+                        onSelectOption={handleSendMessage}
+                        onEditPrompt={handleSendMessage}
+                        isLatestUserPrompt={latestUserMsg?.id === msg.id}
+                      />
+                    ))
+                  })()}
 
                   {/* Simulated live ThinkingIndicator during model generation */}
                   {isStreaming && (
@@ -446,8 +453,9 @@ export const ChatPage: React.FC = () => {
               />
             </div>
 
-            {/* Pinned Input Bar */}
+            {/* Pinned Input Bar & Queue Indicator */}
             <div className="border-t border-border/60 bg-background/95 px-6 py-3 shrink-0 backdrop-blur-sm">
+              <QueueBar />
               <InputBar
                 onSendMessage={handleSendMessage}
                 isStreaming={isStreaming}

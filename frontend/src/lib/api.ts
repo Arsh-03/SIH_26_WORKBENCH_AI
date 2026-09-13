@@ -89,11 +89,36 @@ export interface WorkspaceItem {
 
 export interface DocumentItem {
   id: string
+  workspace_id?: string
   filename: string
-  status: 'PENDING' | 'INDEXED' | 'FAILED'
-  page_count: number
+  filepath?: string
+  file_type?: string
+  classification?: string
+  status: string
+  page_count?: number
   chunk_count: number
   created_at?: string
+}
+
+export interface DocumentContentResponse {
+  document_id: string
+  workspace_id: string
+  filename: string
+  file_type: string
+  content: string
+  chunk_count: number
+  status: string
+}
+
+export interface DocumentStatusResponse {
+  document_id: string
+  workspace_id: string
+  status: string
+  total_pages: number
+  total_chunks: number
+  embedding_model: string
+  vector_dimensions: number
+  completed_at?: string
 }
 
 export interface AgentStreamFrame {
@@ -396,6 +421,54 @@ export const api = {
       body: formData,
     })
     if (!res.ok) throw new Error(`Upload document failed: ${res.statusText}`)
+    return res.json()
+  },
+
+  async getDocumentContent(workspaceId: string, documentId: string): Promise<DocumentContentResponse> {
+    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/documents/${documentId}/content`, {
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) throw new Error(`Fetch document content failed: ${res.statusText}`)
+    return res.json()
+  },
+
+  async updateDocumentContent(
+    workspaceId: string,
+    documentId: string,
+    content: string,
+    filename?: string,
+    classification?: string
+  ): Promise<DocumentStatusResponse> {
+    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/documents/${documentId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ content, filename, classification }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || `Update document failed: ${res.statusText}`)
+    }
+    return res.json()
+  },
+
+  async deleteDocument(workspaceId: string, documentId: string): Promise<{ status: string; document_id: string }> {
+    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/documents/${documentId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) throw new Error(`Delete document failed: ${res.statusText}`)
+    return res.json()
+  },
+
+  async reindexDocument(workspaceId: string, documentId: string): Promise<DocumentStatusResponse> {
+    const res = await fetch(`${API_BASE}/workspaces/${workspaceId}/documents/${documentId}/reindex`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail || `Re-indexing failed: ${res.statusText}`)
+    }
     return res.json()
   },
 

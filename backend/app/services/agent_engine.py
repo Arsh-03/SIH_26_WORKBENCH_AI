@@ -126,14 +126,22 @@ class AgentExecutionEngine:
             })
             step_counter += 1
 
-            # Query vector store & DB chunks
+            # Query vector store: Search both User Workspace and Official Company Knowledge Base (company_shared)
             query_emb = await ollama_client.get_embedding(request.prompt)
-            matches = vector_store_service.query_chunks(
+            user_matches = vector_store_service.query_chunks(
                 workspace_id=request.workspace_id,
                 query_embedding=query_emb,
-                top_k=5,
+                top_k=4,
                 document_ids=request.active_document_ids if request.active_document_ids else None
             )
+            company_matches = vector_store_service.query_chunks(
+                workspace_id="company_shared",
+                query_embedding=query_emb,
+                top_k=4
+            )
+
+            # Merge results, prioritizing exact active document matches
+            matches = user_matches + [c for c in company_matches if not any(u.get("chunk_id") == c.get("chunk_id") for u in user_matches)]
 
             from sqlalchemy import select, or_
             from backend.app.models.sql_models import Document, DocumentChunk
@@ -178,16 +186,21 @@ class AgentExecutionEngine:
 
             # Only add to technical context if matches were found
             if request.active_document_ids or matches:
-                for m in matches:
+                for idx, m in enumerate(matches, 1):
+                    raw_doc_id = m.get("document_id", "doc_sop")
+                    clean_doc_id = re.sub(r"^company_doc_", "", raw_doc_id)
+                    clean_doc_id = re.sub(r"_md$", ".md", clean_doc_id)
+                    full_txt = m.get("content", "")
                     citation = ChunkCitation(
-                        document_id=m.get("document_id", "doc_sop"),
-                        chunk_id=m.get("chunk_id", "chk_001"),
+                        document_id=clean_doc_id,
+                        chunk_id=m.get("chunk_id", f"chk_{idx}"),
                         page_number=m.get("page_number", 1),
-                        snippet=m.get("content", "")[:120]
+                        snippet=full_txt[:320].strip(),
+                        content=full_txt.strip()
                     )
                     citations_collected.append(citation)
                     citation_traces.append(f"{citation.document_id}#{citation.chunk_id}")
-                    rag_results_summary += f"\n[Doc: {citation.document_id}, Page: {citation.page_number}]\n{m.get('content', '')}\n"
+                    rag_results_summary += f"\n[Source [{idx}]: {clean_doc_id}, Page: {citation.page_number}]\n{full_txt}\n"
 
             await send_frame({
                 "event": "tool_result",
@@ -298,18 +311,42 @@ class AgentExecutionEngine:
             except Exception as hist_err:
                 logger.error(f"Error loading thread history from DB: {hist_err}")
 
+        # Load authoritative system prompt from ai_engine/prompts/system_prompt.md
+        system_prompt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../ai_engine/prompts/system_prompt.md"))
+        system_prompt_md = ""
+        if os.path.exists(system_prompt_path):
+            try:
+                with open(system_prompt_path, "r", encoding="utf-8") as sp_f:
+                    system_prompt_md = sp_f.read().strip()
+            except Exception as sp_err:
+                logger.warning(f"Could not read system_prompt.md: {sp_err}")
+
         system_instruction = (
-            "You are the Sovereign AI Engineering Workbench Assistant.\n"
+            f"{system_prompt_md}\n\n" if system_prompt_md else "You are the Sovereign AI Engineering Workbench Assistant.\n"
+        )
+        system_instruction += (
             f"Current On-Premise System Date: {today_date_str}.\n"
             f"Active User Profile: {user_name} ({user_role}).\n"
-            "Respond accurately, clearly, and concisely to the user's prompt.\n"
-            f"When drafting executive memos, SOPs, or formal documents, ALWAYS automatically populate the Date line with '{today_date_str}' and the From line with '{user_name}, {user_role}' instead of leaving generic brackets like [Your Name] or [Current Date].\n"
-            "CRITICAL FORMATTING DIRECTIVE: When writing formal memos, SOPs, or executive text reports, produce ONLY standard prose and document sections. Do NOT append Python scripts, code snippets, or markdown code blocks unless the user explicitly requested software code or script execution in their prompt.\n"
-            "CRITICAL CODE INTEGRITY & COMPLETENESS DIRECTIVE: When writing, refactoring, modifying, or explaining code, ALWAYS keep and provide the COMPLETE code with ALL function definitions (`def ...`, `function ...`, `class ...`), helper functions, parameters, imports, and execution driver intact. NEVER omit, strip, or truncate function declarations or output incomplete fragments without their header definitions."
+            "CRITICAL DIRECTIVES:\n"
+            "- Greetings: When the user greets you ('hey', 'hello', 'hi', 'good morning'), ALWAYS greet back warmly and politely, state what you are made for in 1-2 brief sentences, and ask how you can help with their technical tasks. NEVER decline greetings or say 'it seems like you are trying to initiate a conversation'.\n"
+            "- Off-Topic / Pop-Culture / Cartoons: If asked about non-engineering topics (e.g. 'Doraemon', entertainment, movies, general chit-chat), politely decline and state what you are made for (industrial plant engineering, ASME Section VIII, SOP-401, mathematical physics calculations, and compliance documentation).\n"
+            "- Zero Meta-Prompt Leakage: NEVER mention system directives, guidelines, or prompt rules (never say 'as outlined in the prompt above' or 'following guidelines'). Speak naturally as an engineering colleague.\n"
+            "- Deliver a crisp, balanced, and to-the-point response ('somewhere in between' - not too much, not too brief).\n"
+            "- Avoid overwhelming walls of text. Present facts clearly using scannable bullet points and compact formulas.\n"
+            "- When asked to brief, keep it brief and high-level. When asked to elaborate, provide technical depth. In standard mode, keep it direct and balanced.\n"
+            "- NEVER duplicate sections, formulas, or headers within the same response.\n"
+            "- Mandatory Inline Citations: When referencing or quoting from documents or standards (SOP-401, ASME Section VIII, Safety Policy), ALWAYS include inline citation numbers like [1] or [2] immediately following the statement or document name (e.g. 'Refer to SOP-401 [1], Section 3'). Never mention a document without its citation number.\n"
+            "- Ground your answer strictly in the Retrieved Technical Context below without hallucinating.\n"
+            "- If the user asks an informational question, provide the factual answer directly. Do NOT generate an unrequested Word (.docx) document or executive memo.\n"
+            "- If interactive follow-ups are helpful, append at most ONE :::options block at the very end:\n"
+            ":::options\n"
+            "- Option A description\n"
+            "- Option B description\n"
+            ":::\n"
         )
 
         if rag_results_summary:
-            system_instruction += f"\n\nRetrieved Technical Context:\n{rag_results_summary}"
+            system_instruction += f"\n\nRetrieved Technical Context (Authoritative Company Knowledge Base):\n{rag_results_summary}"
 
         # Detect @filename mentions and load target artifact file content for targeted editing
         at_mentions = re.findall(r"@([a-zA-Z0-9_\-\.\+]+)", request.prompt)
@@ -331,7 +368,7 @@ class AgentExecutionEngine:
             if referenced_context_parts:
                 system_instruction += f"\n\nReferenced Target File Context for Targeted Edits:\n" + "\n\n".join(referenced_context_parts)
 
-        # Extract recent code and topic context from previous conversation turns
+        # Extract recent code context from previous conversation turns only if user specifically requests code documentation
         recent_code_in_thread = all_past_code_snippets[0] if all_past_code_snippets else ""
         if not recent_code_in_thread:
             for past_msg in reversed(thread_history):
@@ -341,23 +378,13 @@ class AgentExecutionEngine:
                     recent_code_in_thread = found_blocks[0].strip()
                     break
 
-        is_doc_or_explain = any(kw in prompt_low for kw in [
-            "doc", "document", "documentation", "spec", "specification", 
-            "report", "overview", "memo", "sop", "fix it", "create a doc", "generate doc"
+        is_explicit_code_doc = recent_code_in_thread and any(phrase in prompt_low for phrase in [
+            "document this code", "create doc for this code", "document the code above", "generate code spec"
         ])
-        if recent_code_in_thread and is_doc_or_explain and not request.active_document_ids:
+        if is_explicit_code_doc and not request.active_document_ids:
             system_instruction += (
                 f"\n\nSource Code from Active Conversation for Documentation Reference:\n```\n{recent_code_in_thread}\n```\n"
-                "DOCUMENT GENERATION DIRECTIVE: The user is asking to create a formal Technical Design Document & Code Specification for the exact code provided above from this conversation.\n"
-                "Generate a complete, thorough, professional Technical Specification formatted in Markdown:\n"
-                "# Technical Specification: [Module/Function Name]\n"
-                "## Executive Summary\n"
-                "## Functional Overview & Architecture\n"
-                "## Implementation Breakdown & Code Logic\n"
-                "## Complexity Analysis (Time & Space)\n"
-                "## Parameters, Return Types & Data Structures\n"
-                "## Usage & Verification Guide\n\n"
-                "CRITICAL: Do NOT generate industrial boiler, MAWP, or ASME SOP documents. Document STRICTLY the provided source code."
+                "The user is asking to create a formal Technical Code Specification for the source code above. Document the code functions, parameters, and verification guide."
             )
 
         # Automatic Context Memory Compression for long sessions (> 10 messages)
@@ -423,14 +450,10 @@ class AgentExecutionEngine:
                     )
             else:
                 if "chat_agent" in plan or any(kw in prompt_low for kw in ["hey", "hi", "hello"]):
-                    model_response = "Hello! I am your Sovereign AI Workbench Assistant. How can I assist you with your code, technical documents, or system architecture?"
+                    model_response = "Hello! I am your Sovereign AI Engineering Workbench Assistant. I'm here to assist you with industrial plant engineering, technical standards (ASME Section VIII, SOP-401, safety policies), pressure vessel calculations, and technical documentation. How can I assist you with your operations today?"
                 else:
                     model_response = "Unable to connect to the sovereign LLM runtime. Please verify that Ollama or your inference endpoint is active."
 
-
-        # Update session thread history
-        thread_history.append({"role": "user", "content": request.prompt})
-        thread_history.append({"role": "assistant", "content": model_response})
 
         duration_ms = int((time.perf_counter() - start_time) * 1000)
 
@@ -439,19 +462,29 @@ class AgentExecutionEngine:
         code_blocks = re.findall(r"```([a-zA-Z0-9_\-\+]*)\n([\s\S]*?)```", model_response)
 
         is_explain_request = any(kw in prompt_low for kw in ["walkthrough", "breakdown", "explain", "complexity"])
-        is_doc_request = (
-            model_capability == "document_creation" or 
-            "rag_agent" in plan or 
-            any(kw in prompt_low for kw in [
-                "doc", "document", "docx", "memo", "sop", "procedure", 
-                "report", "draft", "specification", "spec", "save as doc", "save the output", "save in doc"
-            ])
+        
+        is_question = any(prompt_low.startswith(qw) for qw in [
+            "what", "how", "why", "when", "where", "who", "which", "is ", "are ", 
+            "can ", "could ", "do ", "does ", "tell me", "explain", "describe", "show me", "list"
+        ]) or prompt_low.endswith("?")
+
+        doc_create_verbs = ["create", "generate", "draft", "compile", "build", "write", "export", "save as", "produce", "make a"]
+        doc_create_nouns = ["doc", "document", "docx", "word doc", "formal report", "written memo", "full sop"]
+        is_explicit_doc_creation = (
+            (any(v in prompt_low for v in doc_create_verbs) and any(n in prompt_low for n in doc_create_nouns)) or 
+            any(phrase in prompt_low for phrase in ["save as doc", "save the output", "save in doc", "generate doc", "create doc", "draft report", "export to docx", "save as word"])
         )
+
+        is_doc_request = is_explicit_doc_creation and not is_question
         is_code_request = (
             not is_doc_request and 
             ("code_agent" in plan or any(kw in prompt_low for kw in ["code", "script", "component", "write", "create", "build", "refactor", "function", "class"])) and 
             not is_explain_request
         )
+
+        # Only retain Human-In-The-Loop :::options if generated by model or if query is genuinely ambiguous/underspecified
+        # Standard, well-grounded questions should NOT be force-polluted with option cards.
+        pass
 
         if is_doc_request and len(model_response.strip()) > 30:
             subj_match = (
@@ -485,15 +518,12 @@ class AgentExecutionEngine:
                 ]
             }
 
-            summary_match = re.search(r"(?:Summary|Executive Summary|Purpose):\s*([^\n]+)", model_response, re.IGNORECASE)
-            summary_excerpt = f"\n\n**Executive Summary:** {summary_match.group(1).strip()}" if summary_match else ""
-
-            # Main chat window receives concise executive briefing instead of dumping 80+ lines
-            model_response = (
-                f"📄 **Document Compiled & Ready**\n\n"
-                f"Your document **{clean_title}** has been generated and saved on-premise as a styled Microsoft Word (`.docx`) file.{summary_excerpt}\n\n"
-                f"Click **Open →** or inspect the side panel to view, edit, or download the full `.docx` document."
+            # Retain the full document markdown in chat, prepending the styled document notification banner
+            doc_banner = (
+                f"> 📄 **Document Compiled & Ready**: Saved on-premise as `{clean_title}.docx`.\n"
+                f"> Click **Open →** in the artifact card to view, edit, or download the full Word document.\n\n---\n\n"
             )
+            model_response = doc_banner + model_response
 
             # Announce tool execution frame for document builder
             await send_frame({
@@ -600,6 +630,47 @@ class AgentExecutionEngine:
                 ]
             }
 
+        # Deduplicate repetitive sections and normalize :::options
+        def deduplicate_response_content(text: str) -> str:
+            if not text:
+                return text
+
+            options_matches = re.findall(r":::options\s*([\s\S]*?):::", text)
+            clean_body = re.sub(r":::options\s*([\s\S]*?):::", "", text).strip()
+
+            parts = re.split(r"(?=(?:^|\n)#{1,3}\s+)", clean_body)
+            seen_sections = set()
+            deduped_parts = []
+            for p in parts:
+                p_str = p.strip()
+                if not p_str:
+                    continue
+                key = re.sub(r"\s+", " ", p_str)[:80].lower()
+                if key in seen_sections:
+                    continue
+                seen_sections.add(key)
+                deduped_parts.append(p_str)
+
+            final_text = "\n\n".join(deduped_parts) if deduped_parts else clean_body
+
+            unique_options = []
+            for blk in options_matches:
+                for line in blk.split("\n"):
+                    opt = re.sub(r"^[-*•\d\.\)]\s*", "", line).strip()
+                    if opt and opt not in unique_options:
+                        unique_options.append(opt)
+
+            if unique_options:
+                final_text += "\n\n:::options\n" + "\n".join(f"- {o}" for o in unique_options[:4]) + "\n:::"
+
+            return final_text
+
+        model_response = deduplicate_response_content(model_response)
+
+        # Update session thread history with final model response (single source of truth)
+        thread_history.append({"role": "user", "content": request.prompt})
+        thread_history.append({"role": "assistant", "content": model_response})
+
         # Step 5: Record Cryptographic Audit Trail in SQLite
         audit_record = AuditLog(
             id=generate_id("audit"),
@@ -613,11 +684,6 @@ class AgentExecutionEngine:
         )
         db.add(audit_record)
         await db.commit()
-
-        # Update in-memory session history for turn continuity
-        if session_id in self.session_histories:
-            self.session_histories[session_id].append({"role": "user", "content": request.prompt})
-            self.session_histories[session_id].append({"role": "assistant", "content": model_response})
 
         # Step 6: Emit final_answer frame over WebSocket
         final_frame = {

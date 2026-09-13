@@ -43,6 +43,20 @@ class DocumentItem(BaseModel):
     status: str
     created_at: str
 
+class DocumentContentResponse(BaseModel):
+    document_id: str
+    workspace_id: str
+    filename: str
+    file_type: str
+    content: str
+    chunk_count: int
+    status: str
+
+class DocumentUpdateRequest(BaseModel):
+    content: str
+    filename: Optional[str] = None
+    classification: Optional[str] = None
+
 # WebSocket Agent Execution Models
 class AgentRunRequest(BaseModel):
     action: str = "run_agent"
@@ -57,6 +71,7 @@ class ChunkCitation(BaseModel):
     chunk_id: str
     page_number: int
     snippet: str
+    content: Optional[str] = None
 
 class AgentFinalResponse(BaseModel):
     event: str = "final_answer"

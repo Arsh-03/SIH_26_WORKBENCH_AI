@@ -150,9 +150,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ? 'projects'
         : currentPath.startsWith('/library')
           ? 'library'
-          : currentPath.startsWith('/settings')
-            ? 'settings'
-            : '')
+          : currentPath.startsWith('/company-docs')
+            ? 'company-docs'
+            : currentPath.startsWith('/settings')
+              ? 'settings'
+              : '')
 
   const isOnline = systemHealth?.ollama_running ?? true
   const vramTotal = systemHealth?.gpu_telemetry?.total_vram_mb || 0
@@ -425,6 +427,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
               </svg>
             </Link>
+
+            {/* Company Docs Icon (Strong Right Breakout) */}
+            <Link
+              to="/company-docs"
+              title="Company Knowledge Base & Blueprints"
+              className={`group relative flex h-8 w-8 items-center justify-center rounded-[4px] transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06] ${
+                resolvedActiveNav === 'company-docs'
+                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]'
+                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/90 hover:border-accent-primary/40 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] border border-transparent'
+              }`}
+            >
+              <svg className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </Link>
           </div>
         </div>
 
@@ -602,6 +619,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         {item.id === 'library' && (
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                          </svg>
+                        )}
+                        {item.id === 'company-docs' && (
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                           </svg>
                         )}
                       </span>

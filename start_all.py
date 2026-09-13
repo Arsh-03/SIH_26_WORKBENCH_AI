@@ -39,7 +39,7 @@ def check_and_install_dependencies(root_dir, frontend_dir, python_exe):
     # 2. Check universal Python dependencies
     try:
         res = subprocess.run(
-            [python_exe, "-c", "import aiosqlite, fastapi, uvicorn, docx, chromadb"],
+            [python_exe, "-c", "import jwt, bcrypt, aiosqlite, fastapi, uvicorn, docx, chromadb"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )

@@ -33,10 +33,22 @@ export async function simulateModelResponse(
     return {
       thinkingDuration: `Thought for 0.3 seconds`,
       thinkingSteps: [
-        'Recognized conversational input intent',
-        'Initialized sovereign assistant persona',
+        'Recognized conversational greeting intent',
+        'Initialized sovereign engineering assistant persona',
       ],
-      text: `Hello! I am your Sovereign AI Engineering Workbench Assistant. How can I help you today with your code, industrial SOP documents, or system architecture?`,
+      text: `Hello! I am your Sovereign AI Engineering Workbench Assistant. I'm here to assist you with industrial plant engineering, technical standards (such as ASME Section VIII, boiler SOP-401, and safety policies), pressure vessel calculations, code development, and engineering documentation. How can I assist you with your technical operations today?`,
+    }
+  }
+
+  // Scenario 0.5: Off-topic / Pop culture / Cartoons (e.g. Doraemon, movies, anime)
+  if (/doraemon|anime|cartoon|movie|cinema|actor|celebrity|pop\s*culture|game\s*of\s*thrones|marvel/i.test(promptLower)) {
+    return {
+      thinkingDuration: `Thought for 0.4 seconds`,
+      thinkingSteps: [
+        'Classified query as non-engineering entertainment/pop-culture',
+        'Applying sovereign engineering scope boundary',
+      ],
+      text: `I appreciate the question, but as a Sovereign Engineering AI Assistant, I don't follow pop culture, cartoons, or entertainment. My engine is designed exclusively for industrial plant engineering, technical specifications (like ASME Section VIII and plant SOPs), equipment inspection standards, and mathematical physics analysis. Please let me know if there's an engineering topic, calculation, or procedure I can assist you with!`,
     }
   }
 

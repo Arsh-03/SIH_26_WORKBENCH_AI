@@ -489,14 +489,15 @@ def generate_latex_document(
         elif stripped:
             tex_body.append(f"{escape_latex(stripped)}\\par")
 
+    joined_tex_body = "\n\n".join(tex_body)
     latex_content = f"""\\documentclass[11pt,a4paper]{{article}}
 \\usepackage[utf8]{{inputenc}}
 \\usepackage[margin=1in]{{geometry}}
+\\usepackage{{hyperref}}
 \\usepackage{{xcolor}}
 \\usepackage{{listings}}
-\\usepackage{{booktabs}}
 \\usepackage{{tcolorbox}}
-\\usepackage{{hyperref}}
+\\usepackage{{amsmath}}
 
 \\definecolor{{amberaccent}}{{RGB}}{{217, 119, 6}}
 \\definecolor{{codegray}}{{RGB}}{{244, 244, 245}}
@@ -530,7 +531,7 @@ def generate_latex_document(
 
 \\vspace{{1em}}
 
-{"\n\n".join(tex_body)}
+{joined_tex_body}
 
 \\end{{document}}
 """

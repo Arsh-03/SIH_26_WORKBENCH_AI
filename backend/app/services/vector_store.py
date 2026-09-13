@@ -87,6 +87,25 @@ class VectorStoreService:
                 "metadata": metadatas[i] if i < len(metadatas) else {}
             })
 
+    def delete_document_chunks(self, workspace_id: str, document_id: str) -> None:
+        """Delete all chunks for a document from ChromaDB and fallback store."""
+        if self.chroma_available and self.client:
+            try:
+                collection = self.get_or_create_collection(workspace_id)
+                if collection:
+                    collection.delete(where={"document_id": document_id})
+                    logger.info(f"Deleted Chroma chunks for document {document_id} in {workspace_id}")
+                    return
+            except Exception as e:
+                logger.warning(f"Failed deleting Chroma chunks for {document_id}: {e}")
+
+        # Native store cleanup
+        if workspace_id in self._in_memory_store:
+            self._in_memory_store[workspace_id] = [
+                c for c in self._in_memory_store[workspace_id]
+                if c.get("metadata", {}).get("document_id") != document_id
+            ]
+
     def query_chunks(
         self,
         workspace_id: str,
@@ -154,5 +173,29 @@ class VectorStoreService:
         scored.sort(key=lambda x: x["score"], reverse=True)
         return scored[:top_k]
 
+    async def delete_document_chunks(self, workspace_id: str, document_id: str) -> bool:
+        """Purge all vector embeddings for a specific document from Chroma and in-memory store."""
+        try:
+            if self.chroma_available and self.client:
+                collection = self.get_or_create_collection(workspace_id)
+                # Chroma delete by metadata filter
+                try:
+                    collection.delete(where={"document_id": document_id})
+                    logger.info(f"Purged Chroma vector chunks for doc '{document_id}' in workspace '{workspace_id}'")
+                except Exception as del_err:
+                    logger.warning(f"Chroma collection.delete warning: {del_err}")
+
+            # Clean in-memory store
+            if workspace_id in self._in_memory_store:
+                self._in_memory_store[workspace_id] = [
+                    item for item in self._in_memory_store[workspace_id]
+                    if item.get("metadata", {}).get("document_id") != document_id
+                ]
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting document chunks from vector store: {e}")
+            return False
+
 
 vector_store_service = VectorStoreService()
+

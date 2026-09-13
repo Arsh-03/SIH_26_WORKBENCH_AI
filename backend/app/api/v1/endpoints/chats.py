@@ -17,6 +17,7 @@ from backend.app.models.schemas import (
     ChatMessagePayload,
 )
 from backend.app.core.auth import get_current_user_optional
+from backend.app.services.chat_title_service import clean_heuristic_title
 
 router = APIRouter()
 
@@ -29,15 +30,14 @@ def format_relative_time(dt: datetime) -> str:
     if diff.total_seconds() < 60:
         return "Just now"
     elif diff.total_seconds() < 3600:
-        mins = int(diff.total_seconds() / 60)
+        mins = int(diff.total_seconds() // 60)
         return f"{mins}m ago"
     elif diff.total_seconds() < 86400:
-        hours = int(diff.total_seconds() / 3600)
+        hours = int(diff.total_seconds() // 3600)
         return f"{hours}h ago"
-    elif diff.total_seconds() < 172800:
-        return "Yesterday"
     else:
-        return dt.strftime("%b %d")
+        days = int(diff.total_seconds() // 86400)
+        return f"{days}d ago"
 
 def serialize_message(msg: DBChatMessage) -> ChatMessagePayload:
     steps = None
@@ -45,7 +45,7 @@ def serialize_message(msg: DBChatMessage) -> ChatMessagePayload:
         try:
             steps = json.loads(msg.thinking_steps)
         except Exception:
-            steps = [msg.thinking_steps]
+            steps = None
 
     artifact = None
     if msg.artifact:
@@ -70,9 +70,25 @@ def serialize_message(msg: DBChatMessage) -> ChatMessagePayload:
 def serialize_session_summary(sess: DBChatSession, count: int) -> ChatSessionSummaryResponse:
     dt = sess.updated_at or sess.created_at
     created_at_str = sess.created_at.isoformat() if hasattr(sess.created_at, "isoformat") else str(sess.created_at)
+    
+    # Auto-clean truncated or question-like chat titles
+    raw_title = sess.title or ""
+    if (
+        not raw_title
+        or raw_title == "New Conversation"
+        or raw_title.endswith("…")
+        or raw_title.endswith("...")
+        or raw_title.lower().startswith("what are the")
+        or raw_title.lower().startswith("can you")
+        or raw_title.lower().startswith("what is")
+    ):
+        clean_title = clean_heuristic_title(sess.preview or raw_title)
+        if clean_title and clean_title != "New Conversation":
+            raw_title = clean_title
+
     return ChatSessionSummaryResponse(
         id=sess.id,
-        title=sess.title,
+        title=raw_title,
         preview=sess.preview or "",
         timestamp=format_relative_time(dt),
         model=sess.model or "llama3.1:8b",
@@ -100,9 +116,22 @@ async def list_chats(
     sessions = res.scalars().all()
 
     summaries = []
+    has_updates = False
     for s in sessions:
         msg_count = len(s.messages) if s.messages else 0
-        summaries.append(serialize_session_summary(s, msg_count))
+        summary = serialize_session_summary(s, msg_count)
+        # Self-heal past truncated titles in the database
+        if summary.title and summary.title != s.title:
+            s.title = summary.title
+            has_updates = True
+        summaries.append(summary)
+
+    if has_updates:
+        try:
+            await db.commit()
+        except Exception:
+            pass
+
     return summaries
 
 @router.post("", response_model=ChatSessionDetailResponse, status_code=status.HTTP_201_CREATED)
@@ -182,7 +211,14 @@ async def get_chat_session(
             detail=f"Chat session '{session_id}' not found."
         )
 
-    serialized_msgs = [serialize_message(m) for m in sess.messages]
+    # Deduplicate consecutive identical messages in session if any exist
+    deduped_msgs = []
+    for m in sess.messages:
+        if deduped_msgs and deduped_msgs[-1].sender == m.sender and (deduped_msgs[-1].text or "").strip() == (m.text or "").strip():
+            continue
+        deduped_msgs.append(m)
+
+    serialized_msgs = [serialize_message(m) for m in deduped_msgs]
     dt = sess.updated_at or sess.created_at
     created_at_str = sess.created_at.isoformat() if hasattr(sess.created_at, "isoformat") else str(sess.created_at)
 
@@ -262,7 +298,7 @@ async def add_chat_message(
     sess = await db.get(DBChatSession, session_id)
     if not sess:
         # Auto-create session if it does not exist
-        title = payload.text[:40] + ("…" if len(payload.text) > 40 else "")
+        title = clean_heuristic_title(payload.text)
         sess = DBChatSession(
             id=session_id,
             user_id=current_user.id if current_user else None,

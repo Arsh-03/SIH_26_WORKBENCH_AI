@@ -9,8 +9,13 @@ def _build_supervisor_response(routing_res: Dict[str, Any], prompt_low: str, act
     if is_greeting:
         plan = ["chat_agent"]
     else:
-        # Technical document / SOP search (only when active docs selected or specific industrial keywords present)
-        if active_doc_ids or any(kw in prompt_low for kw in ["sop", "boiler", "mawp", "asme", "valve"]):
+        # Technical document / SOP / Standards search (active docs or industrial keywords)
+        rag_keywords = [
+            "sop", "boiler", "mawp", "asme", "valve", "inspection", "interval",
+            "intervals", "pressure", "thickness", "policy", "air gap", "security",
+            "hydrostatic", "ndt", "ultrasonic", "utg", "standard", "rules", "specification", "spec"
+        ]
+        if active_doc_ids or any(kw in prompt_low for kw in rag_keywords):
             plan.append("rag_agent")
 
         # Code execution / calculation / plotting (only if pure code execution requested and NOT a document request)
