@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useWorkbench } from '../../lib/WorkbenchContext'
 import { api } from '../../lib/api'
@@ -473,46 +473,89 @@ export const InputBar: React.FC<InputBarProps> = ({
     }
   }, [isAttachmentOpen])
 
+  const hasReportInScope = useMemo(() => {
+    return scopeFiles.some((f) => {
+      const lower = f.name.toLowerCase()
+      return (
+        lower.endsWith('.pdf') ||
+        lower.endsWith('.csv') ||
+        lower.endsWith('.xlsx') ||
+        lower.endsWith('.xls') ||
+        lower.endsWith('.docx') ||
+        lower.endsWith('.doc') ||
+        lower.endsWith('.txt') ||
+        lower.endsWith('.json') ||
+        lower.includes('report') ||
+        lower.includes('log') ||
+        lower.includes('telemetry')
+      )
+    })
+  }, [scopeFiles])
+
   return (
     <div className={`relative w-full max-w-4xl mx-auto select-none ${className}`}>
       {/* Context Indicator Strip (DESIGN.md Section 4B): Reflects real open artifact files */}
       <AnimatePresence>
         {scopeFiles.length > 0 && (
-          <div className="flex items-center gap-2 px-3 py-1.5 font-mono text-[10px] text-text-muted">
-            <span className="uppercase tracking-widest text-text-muted/80 font-semibold">
-              IN SCOPE:
-            </span>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {scopeFiles.map((file) => (
-                <motion.div
-                  key={file.id}
-                  initial={{ opacity: 0, scale: 0.8, width: 0 }}
-                  animate={{ opacity: 1, scale: 1, width: 'auto' }}
-                  exit={{
-                    opacity: 0,
-                    scale: 0.8,
-                    width: 0,
-                    paddingLeft: 0,
-                    paddingRight: 0,
-                    marginLeft: 0,
-                    marginRight: 0,
-                  }}
-                  transition={{ duration: 0.15, ease: 'easeOut' }}
-                  className="inline-flex items-center gap-1.5 rounded-[2px] border border-border/80 bg-surface-1 px-2 py-0.5 text-text-body overflow-hidden whitespace-nowrap"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent-primary shrink-0" />
-                  <span className="truncate max-w-[200px]">{file.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeScopeFile(file.id)}
-                    className="ml-1 text-text-muted hover:text-text-primary transition-colors cursor-pointer text-xs leading-none"
-                    aria-label={`Remove ${file.name} from scope`}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 font-mono text-[10px] text-text-muted border-b border-border/40 bg-surface-1/40 rounded-t-[4px]">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="uppercase tracking-widest text-text-muted/80 font-semibold">
+                IN SCOPE:
+              </span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {scopeFiles.map((file) => (
+                  <motion.div
+                    key={file.id}
+                    initial={{ opacity: 0, scale: 0.8, width: 0 }}
+                    animate={{ opacity: 1, scale: 1, width: 'auto' }}
+                    exit={{
+                      opacity: 0,
+                      scale: 0.8,
+                      width: 0,
+                      paddingLeft: 0,
+                      paddingRight: 0,
+                      marginLeft: 0,
+                      marginRight: 0,
+                    }}
+                    transition={{ duration: 0.15, ease: 'easeOut' }}
+                    className="inline-flex items-center gap-1.5 rounded-[2px] border border-border/80 bg-surface-1 px-2 py-0.5 text-text-body overflow-hidden whitespace-nowrap"
                   >
-                    ×
-                  </button>
-                </motion.div>
-              ))}
+                    <span className="h-1.5 w-1.5 rounded-full bg-accent-primary shrink-0" />
+                    <span className="truncate max-w-[200px]">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeScopeFile(file.id)}
+                      className="ml-1 text-text-muted hover:text-text-primary transition-colors cursor-pointer text-xs leading-none"
+                      aria-label={`Remove ${file.name} from scope`}
+                    >
+                      ×
+                    </button>
+                  </motion.div>
+                ))}
+              </div>
             </div>
+
+            {/* Quick Action: Analyze & Generate Infographics */}
+            {hasReportInScope && (
+              <motion.button
+                type="button"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                onClick={() => {
+                  const docList = scopeFiles.map((f) => f.name).join(', ')
+                  const prompt = `Analyze the uploaded document (${docList}) and generate interactive visual analytics including operational KPIs, unit yield curves, 2D equipment fouling heatmaps, and engineering recommendations.`
+                  setInputText(prompt)
+                  if (textareaRef.current) {
+                    textareaRef.current.focus()
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[2px] bg-accent-primary/15 text-accent-primary hover:bg-accent-primary hover:text-black border border-accent-primary/60 shadow-xs transition-all cursor-pointer select-none font-mono text-[10px] font-bold shrink-0 ml-auto group"
+                title="Generate Chart.js, Heatmaps, and KPIs from this report"
+              >
+                <span className="group-hover:scale-110 transition-transform">📊</span>
+                <span>Analyze &amp; Generate Infographics</span>
+              </motion.button>
+            )}
           </div>
         )}
       </AnimatePresence>

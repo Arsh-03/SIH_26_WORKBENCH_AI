@@ -186,6 +186,118 @@ WITH (pages_per_range = 128);`,
     }
   }
 
+  // Scenario 4: Report Infographics, 2D Heatmap & KPI Visualizer
+  if (
+    promptLower.includes('infographic') ||
+    promptLower.includes('heatmap') ||
+    promptLower.includes('kpi') ||
+    promptLower.includes('radar') ||
+    promptLower.includes('chart.js') ||
+    promptLower.includes('analyze') ||
+    promptLower.includes('report')
+  ) {
+    return {
+      thinkingDuration: `Thought for ${durationSeconds} seconds`,
+      thinkingSteps: [
+        'Parsing uploaded report telemetry and equipment inspection tables...',
+        'Computing 2D fouling factors across shell and tube passes (ASME/TEMA standards)...',
+        'Calculating throughput delta variances and high-pressure steam OPEX metrics...',
+        'Synthesizing interactive Chart.js radar distribution and 2D intensity heatmap...',
+        ...toolNotes,
+      ],
+      text: `I have completed the technical analysis of the document. Below is the synthesized industrial telemetry report, including the **2D Tube-Bundle Fouling Heatmap**, **Executive KPI Scorecard**, and **Multi-Axis Performance Radar**.
+
+:::analysis_progress
+{
+  "title": "REPORT EXTRACTION & TELEMETRY INGESTION PIPELINE",
+  "steps": [
+    { "name": "Telemetry Ingestion & Tabular OCR", "status": "completed", "detail": "Parsed 14 unit logs" },
+    { "name": "ASME / TEMA Fouling Calculation", "status": "completed", "detail": "Computed thermal degradation" },
+    { "name": "Chart.js & Heatmap Synthesis", "status": "completed", "detail": "Rendered 2D matrix" }
+  ]
+}
+:::
+
+:::infographic
+{
+  "title": "MRPL Crude Distillation Unit (CDU-1) Performance Dashboard",
+  "subtitle": "Synthesized Operational Analytics & Heat Exchanger Inspection",
+  "kpis": [
+    {
+      "label": "CDU-1 Crude Throughput",
+      "value": "14,850",
+      "unit": "MT/Day",
+      "target": "15,000 MT/d",
+      "delta": "+2.4%",
+      "status": "nominal",
+      "sparkline": [14200, 14450, 14600, 14750, 14850]
+    },
+    {
+      "label": "High-Pressure Steam OPEX",
+      "value": "$38.40",
+      "unit": "/ Ton",
+      "target": "$35.00",
+      "delta": "+9.7%",
+      "status": "warning",
+      "sparkline": [34, 35, 36.5, 37.8, 38.4]
+    },
+    {
+      "label": "Superheater Thermal Creep Risk",
+      "value": "CRITICAL",
+      "target": "ASME Sec VIII",
+      "delta": "-14.2% Life",
+      "status": "critical",
+      "sparkline": [95, 90, 82, 71, 58]
+    }
+  ],
+  "heatmap": {
+    "title": "Heat Exchanger Tube-Bundle Fouling Intensity Matrix",
+    "xLabels": ["E-101", "E-102", "E-103", "E-104", "E-105"],
+    "yLabels": ["Inlet Zone", "Mid Pass 1", "Mid Pass 2", "Outlet Zone"],
+    "values": [
+      [1.2, 2.4, 1.8, 3.1, 4.2],
+      [0.8, 1.5, 2.1, 2.8, 3.7],
+      [1.9, 2.8, 3.4, 4.1, 5.0],
+      [0.5, 0.9, 1.2, 1.8, 2.4]
+    ],
+    "valueLabel": "Fouling Factor (m² K / kW)",
+    "colorScale": "thermal"
+  },
+  "chartjs": {
+    "type": "radar",
+    "title": "Unit Efficiency & Reliability Fingerprint",
+    "labels": ["Thermal Yield", "Steam Efficiency", "ASME Margin", "Creep Reserve", "Emissions"],
+    "datasets": [
+      {
+        "label": "Current Operating State",
+        "data": [88, 74, 92, 65, 82],
+        "borderColor": "#D97A3F",
+        "backgroundColor": "rgba(217, 122, 63, 0.25)"
+      },
+      {
+        "label": "Design Target (SOP-401)",
+        "data": [95, 90, 100, 95, 90],
+        "borderColor": "#10B981",
+        "backgroundColor": "rgba(16, 185, 129, 0.15)"
+      }
+    ]
+  },
+  "rawTable": [
+    { "Exchanger": "E-101", "InletTempC": 350, "OutletTempC": 280, "FoulingIndex": 1.2, "Status": "Nominal" },
+    { "Exchanger": "E-102", "InletTempC": 380, "OutletTempC": 295, "FoulingIndex": 2.4, "Status": "Nominal" },
+    { "Exchanger": "E-103", "InletTempC": 410, "OutletTempC": 310, "FoulingIndex": 1.8, "Status": "Nominal" },
+    { "Exchanger": "E-104", "InletTempC": 440, "OutletTempC": 330, "FoulingIndex": 3.1, "Status": "Warning" },
+    { "Exchanger": "E-105", "InletTempC": 480, "OutletTempC": 360, "FoulingIndex": 4.2, "Status": "Critical" }
+  ]
+}
+:::
+
+### Engineering Recommendations:
+1. **Backwash Schedule**: Schedule chemical de-scaling for exchanger **E-105** during the upcoming 48-hour maintenance window.
+2. **Steam Temperature**: Throttle superheater bypass valve V-204 to maintain outlet temperatures under 450°C in compliance with **SOP-401** to mitigate creep acceleration.`,
+    }
+  }
+
   // Default: Conversational & Technical Explanation without hardcoded code artifacts
   return {
     thinkingDuration: `Thought for ${durationSeconds} seconds`,

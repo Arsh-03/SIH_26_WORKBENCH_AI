@@ -8,6 +8,7 @@ import { ThinkingIndicator } from './ThinkingIndicator'
 import { ArtifactCard } from './ArtifactCard'
 import { InteractiveCodeBlock } from './InteractiveCodeBlock'
 import { InteractiveChartCard, type ChartSpec } from './InteractiveChartCard'
+import { InfographicsCard, type InfographicSpec } from './InfographicsCard'
 import { InteractiveEconomicsCard, type EconomicsSpec } from './InteractiveEconomicsCard'
 import { InteractivePhysicsCard, type PhysicsSpec } from './InteractivePhysicsCard'
 import { InteractivePidCanvas, type PidSpec } from './InteractivePidCanvas'
@@ -208,22 +209,27 @@ const normalizeOutputBlocks = (rawText: string): string => {
 }
 
 interface ContentPart {
-  type: 'text' | 'chart' | 'economics' | 'physics' | 'output' | 'pid'
+  type: 'text' | 'chart' | 'infographic' | 'economics' | 'physics' | 'output' | 'pid' | 'analysis_progress'
   content?: string
   chartSpec?: ChartSpec
+  infographicSpec?: InfographicSpec
   economicsSpec?: EconomicsSpec
   physicsSpec?: PhysicsSpec
   pidSpec?: PidSpec
   outputContent?: string
+  analysisProgress?: {
+    title?: string
+    steps: Array<{ name: string; status: 'completed' | 'in_progress' | 'pending'; detail?: string }>
+  }
 }
 
 /**
- * Splits text into markdown text segments and dynamic :::chart, :::economics, :::physics, :::output, and :::pid blocks.
+ * Splits text into markdown text segments and dynamic :::chart, :::infographic, :::economics, :::physics, :::output, and :::pid blocks.
  */
 const parseContentWithCharts = (text: string): ContentPart[] => {
   if (!text) return [{ type: 'text', content: '' }]
 
-  const regex = /:::(chart|economics|physics|output|pid)\s*([\s\S]*?):::/g
+  const regex = /:::(chart|infographic|economics|physics|output|pid|analysis_progress)\s*([\s\S]*?):::/g
   const parts: ContentPart[] = []
   let lastIndex = 0
   let match: RegExpExecArray | null
@@ -255,8 +261,25 @@ const parseContentWithCharts = (text: string): ContentPart[] => {
       }
 
       if (parsed && typeof parsed === 'object') {
-        if (blockType === 'chart' && Array.isArray(parsed.data)) {
-          parts.push({ type: 'chart', chartSpec: parsed })
+        if (blockType === 'infographic') {
+          parts.push({ type: 'infographic', infographicSpec: parsed })
+        } else if (blockType === 'chart') {
+          // If chart contains advanced infographic types, route to infographicSpec
+          if (
+            parsed.type === 'heatmap' ||
+            parsed.type === 'radar' ||
+            parsed.type === 'kpi' ||
+            parsed.type === 'multi_axis' ||
+            parsed.type === 'figure' ||
+            parsed.heatmap ||
+            parsed.kpis
+          ) {
+            parts.push({ type: 'infographic', infographicSpec: parsed })
+          } else {
+            parts.push({ type: 'chart', chartSpec: parsed })
+          }
+        } else if (blockType === 'analysis_progress') {
+          parts.push({ type: 'analysis_progress', analysisProgress: parsed })
         } else if (blockType === 'economics') {
           parts.push({ type: 'economics', economicsSpec: parsed })
         } else if (blockType === 'physics') {
@@ -779,6 +802,62 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
       {/* Model Body Text: General Sans, line-height 1.65 with Markdown Parsing, KaTeX Math & Dynamic Charts */}
       <div className="font-body text-[15px] leading-[1.7] text-text-body pl-0.5 space-y-2.5 w-full">
         {contentParts.map((part, pIdx) => {
+          if (part.type === 'infographic' && part.infographicSpec) {
+            return (
+              <InfographicsCard
+                key={`infographic-${pIdx}`}
+                spec={part.infographicSpec}
+              />
+            )
+          }
+
+          if (part.type === 'analysis_progress' && part.analysisProgress) {
+            return (
+              <div
+                key={`prog-${pIdx}`}
+                className="my-3 p-3.5 rounded-[4px] border border-border bg-[#181410] font-mono text-xs space-y-2.5 shadow-xs select-none"
+              >
+                <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                  <span className="font-semibold uppercase tracking-wider text-accent-primary flex items-center gap-2">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-primary opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-primary"></span>
+                    </span>
+                    {part.analysisProgress.title || 'DOCUMENT REPORT EXTRACTION PIPELINE'}
+                  </span>
+                  <span className="text-[10px] text-text-muted">SOVEREIGN ANALYTICS</span>
+                </div>
+                <div className="space-y-2">
+                  {part.analysisProgress.steps.map((step, sIdx) => (
+                    <div key={sIdx} className="flex items-center justify-between text-[11px]">
+                      <div className="flex items-center gap-2">
+                        {step.status === 'completed' ? (
+                          <span className="text-emerald-400 font-bold">✓</span>
+                        ) : step.status === 'in_progress' ? (
+                          <span className="text-accent-primary animate-spin">◐</span>
+                        ) : (
+                          <span className="text-text-muted/60">○</span>
+                        )}
+                        <span
+                          className={
+                            step.status === 'completed'
+                              ? 'text-text-primary'
+                              : step.status === 'in_progress'
+                              ? 'text-accent-primary font-semibold'
+                              : 'text-text-muted'
+                          }
+                        >
+                          {step.name}
+                        </span>
+                      </div>
+                      {step.detail && <span className="text-[10px] text-text-muted">{step.detail}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          }
+
           if (part.type === 'chart' && part.chartSpec) {
             return (
               <InteractiveChartCard

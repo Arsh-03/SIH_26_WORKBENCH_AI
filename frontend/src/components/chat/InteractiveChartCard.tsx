@@ -29,6 +29,14 @@ import {
   Image as ImageIcon,
   ArrowUpDown,
 } from "lucide-react";
+import {
+  InfographicsCard,
+  type InfographicSpec,
+  type HeatmapData,
+  type KpiItem,
+  type ChartJsSpec,
+  type StaticFigureSpec,
+} from "./InfographicsCard";
 
 export interface ChartSeries {
   key: string;
@@ -36,18 +44,34 @@ export interface ChartSeries {
   color?: string;
 }
 
-export type SupportedChartType = "line" | "bar" | "area" | "pie";
+export type SupportedChartType =
+  | "line"
+  | "bar"
+  | "area"
+  | "pie"
+  | "heatmap"
+  | "radar"
+  | "kpi"
+  | "multi_axis"
+  | "figure"
+  | "infographic";
 
 export interface ChartSpec {
   type?: SupportedChartType;
   allowedTypes?: SupportedChartType[];
   title?: string;
   description?: string;
+  subtitle?: string;
   xAxisKey?: string;
   xAxisLabel?: string;
   yAxisLabel?: string;
   series?: ChartSeries[];
-  data: Array<Record<string, any>>;
+  data?: Array<Record<string, any>>;
+  heatmap?: HeatmapData;
+  kpis?: KpiItem[];
+  chartjs?: ChartJsSpec;
+  figure?: StaticFigureSpec;
+  rawTable?: Array<Record<string, any>>;
 }
 
 interface InteractiveChartCardProps {
@@ -73,6 +97,33 @@ export const InteractiveChartCard: React.FC<InteractiveChartCardProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Check if this is an advanced infographic or Chart.js spec
+  const isInfographicType =
+    spec.type === "heatmap" ||
+    spec.type === "radar" ||
+    spec.type === "kpi" ||
+    spec.type === "multi_axis" ||
+    spec.type === "figure" ||
+    spec.type === "infographic" ||
+    Boolean(spec.heatmap) ||
+    Boolean(spec.kpis && spec.kpis.length > 0) ||
+    Boolean(spec.chartjs) ||
+    Boolean(spec.figure);
+
+  if (isInfographicType) {
+    const infographicPayload: InfographicSpec = {
+      type: spec.type as any,
+      title: spec.title,
+      subtitle: spec.subtitle || spec.description,
+      kpis: spec.kpis,
+      heatmap: spec.heatmap,
+      chartjs: spec.chartjs,
+      figure: spec.figure,
+      rawTable: spec.rawTable || spec.data,
+    };
+    return <InfographicsCard spec={infographicPayload} isExpanded={isExpanded} />;
+  }
 
   const initialType = (spec.type || "line").toLowerCase() as SupportedChartType;
   const [chartType, setChartType] = useState<SupportedChartType>(initialType);
@@ -166,7 +217,7 @@ export const InteractiveChartCard: React.FC<InteractiveChartCardProps> = ({
   const categoricalData = useMemo(() => {
     let items: Array<{ name: string; key: string; value: number; color: string }> = [];
 
-    if (isSingleRowBreakdown) {
+    if (isSingleRowBreakdown && spec.data && spec.data.length > 0) {
       const row = spec.data[0];
       items = rawSeriesList.map((s, idx) => {
         const val = typeof row[s.key] === "number" ? row[s.key] : Number(row[s.key]) || 0;
@@ -610,7 +661,7 @@ export const InteractiveChartCard: React.FC<InteractiveChartCardProps> = ({
                         <td className="p-2 text-text-body font-bold">{row.value}</td>
                       </tr>
                     ))
-                  : spec.data.map((row, rIdx) => (
+                  : (spec.data || []).map((row, rIdx) => (
                       <tr
                         key={rIdx}
                         className="border-b border-border/40 hover:bg-surface-2/40 transition-colors text-[11.5px]"
