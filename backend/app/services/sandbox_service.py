@@ -209,9 +209,27 @@ class SandboxService:
                 limits_exceeded = True
 
         except Exception as e:
-            exit_code = 1
-            stdout = ""
-            stderr = f"Subprocess execution error: {str(e)}"
+            # Fallback to robust synchronous subprocess.run executed in thread pool (bypasses Windows event loop issues)
+            try:
+                import subprocess
+                def _run_sync():
+                    return subprocess.run(
+                        cmd,
+                        input=(stdin_input or "10\n20\n30\n40\n50\n"),
+                        text=True,
+                        capture_output=True,
+                        timeout=float(timeout_seconds),
+                        cwd=str(self.artifacts_dir),
+                        env=env
+                    )
+                sub_res = await asyncio.to_thread(_run_sync)
+                exit_code = sub_res.returncode
+                stdout = sub_res.stdout
+                stderr = sub_res.stderr
+            except Exception as e2:
+                exit_code = 1
+                stdout = ""
+                stderr = f"Subprocess execution error: {str(e2)}"
         finally:
             if script_path and os.path.exists(script_path):
                 try:

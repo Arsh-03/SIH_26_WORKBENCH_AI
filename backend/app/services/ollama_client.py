@@ -21,6 +21,22 @@ class OllamaClient:
         "User-Agent": "Sovereign-Workbench-Client/1.0"
     }
 
+    async def unload_other_models(self, active_model: str) -> None:
+        """Ensure only the active model occupies GPU VRAM, preventing Colab VRAM overflow & PCIe paging."""
+        try:
+            health = await self.check_health()
+            running = health.get("running_models", [])
+            for m in running:
+                if m != active_model and not (active_model.lower() in m.lower() or m.lower() in active_model.lower()):
+                    async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=3.0) as client:
+                        await client.post(
+                            f"{self.base_url}/api/chat",
+                            json={"model": m, "keep_alive": 0}
+                        )
+                        logger.info(f"Evicted lingering model '{m}' from GPU VRAM to maintain peak inference speed.")
+        except Exception:
+            pass
+
     async def generate_chat_stream(
         self,
         messages: List[Dict[str, str]],
@@ -29,15 +45,16 @@ class OllamaClient:
     ) -> AsyncGenerator[str, None]:
         """Stream token chunks line-by-line from local/remote Ollama chat API."""
         target_model = model or self.reasoning_model
+        await self.unload_other_models(target_model)
         try:
-            async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=90.0) as client:
+            async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=180.0) as client:
                 payload = {
                     "model": target_model,
                     "messages": messages,
                     "options": {
                         "temperature": temperature
                     },
-                    "keep_alive": "15m",
+                    "keep_alive": "30m",
                     "stream": True
                 }
                 async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
@@ -53,12 +70,15 @@ class OllamaClient:
                                     yield token
                             except Exception:
                                 continue
+                    else:
+                        err_body = await response.aread()
+                        logger.error(f"Ollama chat streaming returned HTTP {response.status_code}: {err_body.decode('utf-8', errors='replace')}")
         except Exception as e:
             logger.error(f"Ollama chat streaming error with model {target_model}: {e}")
 
     async def check_health(self) -> Dict[str, Any]:
 
-        """Check if local/remote Ollama server is running and get available models (cached 60s)."""
+        """Check if local/remote Ollama server is running and get available & warm/resident models."""
         import time
         now = time.time()
         if self._cached_health and (now - self._cached_health_time) < 5.0:
@@ -70,14 +90,29 @@ class OllamaClient:
                 if res.status_code == 200:
                     data = res.json()
                     models = [m.get("name", "") for m in data.get("models", [])]
-                    res_dict = {"running": True, "available_models": models}
+                    
+                    # Inspect active/warm models in GPU VRAM via /api/ps
+                    running_models = []
+                    try:
+                        ps_res = await client.get(f"{self.base_url}/api/ps")
+                        if ps_res.status_code == 200:
+                            ps_data = ps_res.json()
+                            running_models = [m.get("name", "") for m in ps_data.get("models", [])]
+                    except Exception:
+                        pass
+
+                    res_dict = {
+                        "running": True,
+                        "available_models": models,
+                        "running_models": running_models
+                    }
                     self._cached_health = res_dict
                     self._cached_health_time = now
                     return res_dict
 
         except Exception as e:
             logger.debug(f"Ollama server not reachable: {e}")
-        return {"running": False, "available_models": []}
+        return {"running": False, "available_models": [], "running_models": []}
 
 
     def _generate_fallback_embedding(self, text: str, dimensions: int = 768) -> List[float]:
@@ -118,15 +153,16 @@ class OllamaClient:
     ) -> str:
         """Call local/remote Ollama chat API with robust single-JSON and NDJSON streaming parsing."""
         target_model = model or self.reasoning_model
+        await self.unload_other_models(target_model)
         try:
-            async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=90.0) as client:
+            async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=180.0) as client:
                 payload = {
                     "model": target_model,
                     "messages": messages,
                     "options": {
                         "temperature": temperature
                     },
-                    "keep_alive": "15m",
+                    "keep_alive": "30m",
                     "stream": False
                 }
                 res = await client.post(f"{self.base_url}/api/chat", json=payload)

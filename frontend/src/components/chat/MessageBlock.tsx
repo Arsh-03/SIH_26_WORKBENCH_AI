@@ -1,11 +1,16 @@
 import React from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
+import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
 import type { ChatMessage, ArtifactData, ChatCitationItem } from '../../lib/types'
 import { ThinkingIndicator } from './ThinkingIndicator'
 import { ArtifactCard } from './ArtifactCard'
 import { InteractiveCodeBlock } from './InteractiveCodeBlock'
+import { InteractiveChartCard, type ChartSpec } from './InteractiveChartCard'
+import { InteractiveEconomicsCard, type EconomicsSpec } from './InteractiveEconomicsCard'
+import { InteractivePhysicsCard, type PhysicsSpec } from './InteractivePhysicsCard'
+import { InteractivePidCanvas, type PidSpec } from './InteractivePidCanvas'
 import { api } from '../../lib/api'
 
 export interface MessageBlockProps {
@@ -16,6 +21,17 @@ export interface MessageBlockProps {
   isLatestUserPrompt?: boolean
   isArtifactOpen?: boolean
   className?: string
+}
+
+/**
+ * Normalizes Markdown tables, ensuring that compressed row delimiters on the same line ('| |')
+ * are broken into separate lines with proper Markdown table syntax so remark-gfm parses them into HTML tables.
+ */
+const normalizeMarkdownTables = (rawText: string): string => {
+  if (!rawText || !rawText.includes('|')) return rawText
+  let formatted = rawText.replace(/\|\s*\|\s*(?=[^|\n]+(?:\||$))/g, '|\n|')
+  formatted = formatted.replace(/([^\n])\n(\|(?:\s*[^|\n]+\s*\|)+)\n(\|(?:\s*[-:]+[-| :]*\|)+)/g, '$1\n\n$2\n$3')
+  return formatted
 }
 
 /**
@@ -97,22 +113,19 @@ const preprocessCitations = (rawText: string, citations?: ChatCitationItem[]): s
     }
   )
 
-  // 4. Transform standalone document filename references ending in .md or .pdf (not already linked or inside URLs)
+  // 4. Transform standalone document filename references only if they match verified retrieved citations
   text = text.replace(
     /(?<![\[\(/#a-zA-Z0-9_\-])(?:company_shared\/)?([A-Za-z0-9_\-]+\.(?:md|pdf|docx|txt))(?![\]\)\w])/gi,
     (match, docFileName) => {
       if (match.includes('#cite-') || match.includes('](')) return match
-      let citIdx = 1
-      if (citations && citations.length > 0) {
-        const foundIdx = citations.findIndex(
-          (c) =>
-            c.document_id.toLowerCase().includes(docFileName.toLowerCase()) ||
-            docFileName.toLowerCase().includes(c.document_id.toLowerCase())
-        )
-        if (foundIdx >= 0) {
-          citIdx = foundIdx + 1
-        }
-      }
+      if (!citations || citations.length === 0) return match
+      const foundIdx = citations.findIndex(
+        (c) =>
+          c.document_id.toLowerCase().includes(docFileName.toLowerCase()) ||
+          docFileName.toLowerCase().includes(c.document_id.toLowerCase())
+      )
+      if (foundIdx < 0) return match
+      const citIdx = foundIdx + 1
       const cleanDoc = cleanDocName(docFileName)
       return `[${cleanDoc}](#cite-${docFileName}) [${citIdx}](#cite-${citIdx})`
     }
@@ -175,6 +188,100 @@ const extractOptions = (text: string): { cleanText: string; options: string[] } 
     }
   }
   return { cleanText, options: rawOptions }
+}
+
+/**
+ * Detects code execution outputs (e.g. `**Output:**\n\n...` or `Output:\n...`)
+ * and transforms them into structured `:::output\n...\n:::` blocks so they render as
+ * highlighted, high-contrast terminal execution output cards.
+ */
+const normalizeOutputBlocks = (rawText: string): string => {
+  if (!rawText) return ''
+  return rawText.replace(
+    /(?:^|\n)(?:\*{0,2}(?:Output|Terminal Output|Execution Output|Console Output)\*{0,2}:\s*)\n+((?:(?!\n\s*#{1,4}\s|\n\s*```|\n\s*:::|\n\s*\*{0,2}(?:ASME|Creep|Fuel|Comparison|Conclusion|Recommendation|Option))[^\n]+(?:\n|$))+)/gi,
+    (_, outContent) => {
+      const trimmed = outContent.trim()
+      if (!trimmed) return _
+      return `\n\n:::output\n${trimmed}\n:::\n\n`
+    }
+  )
+}
+
+interface ContentPart {
+  type: 'text' | 'chart' | 'economics' | 'physics' | 'output' | 'pid'
+  content?: string
+  chartSpec?: ChartSpec
+  economicsSpec?: EconomicsSpec
+  physicsSpec?: PhysicsSpec
+  pidSpec?: PidSpec
+  outputContent?: string
+}
+
+/**
+ * Splits text into markdown text segments and dynamic :::chart, :::economics, :::physics, :::output, and :::pid blocks.
+ */
+const parseContentWithCharts = (text: string): ContentPart[] => {
+  if (!text) return [{ type: 'text', content: '' }]
+
+  const regex = /:::(chart|economics|physics|output|pid)\s*([\s\S]*?):::/g
+  const parts: ContentPart[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      const textBefore = text.slice(lastIndex, match.index)
+      if (textBefore.trim()) {
+        parts.push({ type: 'text', content: textBefore })
+      }
+    }
+
+    const blockType = match[1].toLowerCase()
+    const rawJson = match[2].trim()
+
+    if (blockType === 'output') {
+      parts.push({ type: 'output', outputContent: rawJson })
+    } else {
+      let parsed: any = null
+      try {
+        parsed = JSON.parse(rawJson)
+      } catch {
+        try {
+          const fixed = rawJson.replace(/,\s*([}\]])/g, '$1')
+          parsed = JSON.parse(fixed)
+        } catch {
+          parsed = null
+        }
+      }
+
+      if (parsed && typeof parsed === 'object') {
+        if (blockType === 'chart' && Array.isArray(parsed.data)) {
+          parts.push({ type: 'chart', chartSpec: parsed })
+        } else if (blockType === 'economics') {
+          parts.push({ type: 'economics', economicsSpec: parsed })
+        } else if (blockType === 'physics') {
+          parts.push({ type: 'physics', physicsSpec: parsed })
+        } else if (blockType === 'pid') {
+          parts.push({ type: 'pid', pidSpec: parsed })
+        } else {
+          parts.push({ type: 'text', content: '```json\n' + rawJson + '\n```' })
+        }
+      } else {
+        parts.push({ type: 'text', content: '```json\n' + rawJson + '\n```' })
+      }
+    }
+
+    lastIndex = regex.lastIndex
+  }
+
+  if (lastIndex < text.length) {
+    const textAfter = text.slice(lastIndex)
+    if (textAfter.trim()) {
+      parts.push({ type: 'text', content: textAfter })
+    }
+  }
+
+  return parts.length > 0 ? parts : [{ type: 'text', content: text }]
 }
 
 interface CitationBadgeAnchorProps {
@@ -604,8 +711,11 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
   }
 
   const { cleanText, options } = extractOptions(message.text)
-  const textWithCitations = preprocessCitations(cleanText, message.citations)
+  const outputNormalized = normalizeOutputBlocks(cleanText)
+  const tableNormalized = normalizeMarkdownTables(outputNormalized)
+  const textWithCitations = preprocessCitations(tableNormalized, message.citations)
   const processedText = preprocessMathText(textWithCitations)
+  const contentParts = parseContentWithCharts(processedText)
 
   const handleCopyAiContent = async () => {
     try {
@@ -666,107 +776,189 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
         />
       )}
 
-      {/* Model Body Text: General Sans, line-height 1.65 with Markdown Parsing & KaTeX Math */}
+      {/* Model Body Text: General Sans, line-height 1.65 with Markdown Parsing, KaTeX Math & Dynamic Charts */}
       <div className="font-body text-[15px] leading-[1.7] text-text-body pl-0.5 space-y-2.5 w-full">
-        <ReactMarkdown
-          remarkPlugins={[remarkMath]}
-          rehypePlugins={[rehypeKatex]}
-          components={{
-            p: ({ children }) => <p className="mb-2 leading-[1.7] text-text-body">{children}</p>,
-            strong: ({ children }) => (
-              <strong className="font-semibold text-text-primary tracking-tight">
-                {children}
-              </strong>
-            ),
-            h1: ({ children }) => (
-              <h1 className="font-title text-[18px] font-semibold text-text-primary mt-3 mb-1.5 border-b border-border/40 pb-1">
-                {children}
-              </h1>
-            ),
-            h2: ({ children }) => (
-              <h2 className="font-title text-[16px] font-semibold text-text-primary mt-3 mb-1">
-                {children}
-              </h2>
-            ),
-            h3: ({ children }) => (
-              <h3 className="font-title text-[15px] font-medium text-accent-primary mt-2 mb-1">
-                {children}
-              </h3>
-            ),
-            ul: ({ children }) => <ul className="list-disc pl-5 my-2 space-y-1 text-text-body">{children}</ul>,
-            ol: ({ children }) => <ol className="list-decimal pl-5 my-2 space-y-1 text-text-body">{children}</ol>,
-            li: ({ children }) => <li className="pl-0.5">{children}</li>,
-            code: ({ className, children }: any) => {
-              const match = /language-(\w+)/.exec(className || '')
-              const content = String(children).replace(/\n$/, '')
-              const isMultiline = content.includes('\n')
-              if (match || isMultiline) {
-                return (
-                  <InteractiveCodeBlock
-                    code={content}
-                    language={match ? match[1] : 'python'}
-                  />
-                )
-              }
-              // Defensive safeguard: If an inline code block contains a citation link, don't display raw link syntax
-              if (content.includes('#cite-') || /\[.*?\]\(#cite-.*?\)/.test(content)) {
-                const cleaned = content.replace(/\[(.*?)\]\(#cite-.*?\)/g, '$1')
-                return (
-                  <span className="font-mono text-[11px] text-accent-primary bg-surface-2 px-1.5 py-0.5 rounded border border-border/80">
-                    {cleaned}
+        {contentParts.map((part, pIdx) => {
+          if (part.type === 'chart' && part.chartSpec) {
+            return (
+              <InteractiveChartCard
+                key={`chart-${pIdx}`}
+                spec={part.chartSpec}
+              />
+            )
+          }
+
+          if (part.type === 'economics' && part.economicsSpec) {
+            return (
+              <InteractiveEconomicsCard
+                key={`econ-${pIdx}`}
+                spec={part.economicsSpec}
+              />
+            )
+          }
+
+          if (part.type === 'physics' && part.physicsSpec) {
+            return (
+              <InteractivePhysicsCard
+                key={`phys-${pIdx}`}
+                spec={part.physicsSpec}
+              />
+            )
+          }
+
+          if (part.type === 'output' && part.outputContent) {
+            return (
+              <div
+                key={`out-${pIdx}`}
+                className="my-3 w-full rounded-md border border-border/80 bg-[#14100C] overflow-hidden shadow-xs"
+              >
+                <div className="flex items-center justify-between px-3.5 py-1.5 bg-surface-2/90 border-b border-border/60">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span className="font-mono text-[10px] uppercase font-bold text-accent-primary tracking-wider">
+                      TERMINAL · SIMULATION OUTPUT
+                    </span>
+                  </div>
+                  <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-surface-1 border border-border/60 text-text-muted">
+                    PYTHON ENCLAVE
                   </span>
-                )
-              }
-              return (
-                <code className="font-mono text-[13px] bg-surface-2 text-accent-primary px-1.5 py-0.5 rounded border border-border/50">
-                  {children}
-                </code>
-              )
-            },
-            a: ({ href, children }: any) => {
-              const hrefStr = href || ''
-              const childStr = String(children || '').trim()
-              const isCitationLink =
-                hrefStr.startsWith('#cite-') ||
-                hrefStr.startsWith('citation://') ||
-                /[①-⑩]/.test(childStr) ||
-                /^\[?\d+\]?$/.test(childStr) ||
-                (/^\[?[A-Za-z0-9_\-\.\s]+\]?$/.test(childStr) && hrefStr.startsWith('#cite'))
+                </div>
+                <div className="p-3.5 font-mono text-[13px] leading-relaxed text-emerald-400/95 whitespace-pre-wrap bg-[#100C09] selection:bg-emerald-900/50">
+                  {part.outputContent}
+                </div>
+              </div>
+            )
+          }
 
-              if (isCitationLink) {
-                return (
-                  <CitationBadgeAnchor
-                    hrefStr={hrefStr}
-                    childStr={childStr}
-                    citations={message.citations}
-                    fullText={message.text}
-                    onOpenCitation={handleOpenCitation}
-                  >
+          if (part.type === 'pid' && part.pidSpec) {
+            return (
+              <InteractivePidCanvas
+                key={`pid-${pIdx}`}
+                spec={part.pidSpec}
+                onSelectEquipment={(tag) => {
+                  if (onSelectOption) onSelectOption(`Inspect operating specs for ${tag}`)
+                }}
+              />
+            )
+          }
+
+          if (!part.content) return null
+
+          return (
+            <ReactMarkdown
+              key={`md-${pIdx}`}
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+              components={{
+                p: ({ children }) => <p className="mb-2 leading-[1.7] text-text-body">{children}</p>,
+                table: ({ children }) => (
+                  <div className="overflow-x-auto my-3 rounded-[3px] border border-border/80 bg-surface-1/60 shadow-2xs">
+                    <table className="min-w-full divide-y divide-border border-collapse text-[13px]">{children}</table>
+                  </div>
+                ),
+                thead: ({ children }) => <thead className="bg-surface-2/90 text-text-primary font-bold text-xs uppercase tracking-wider">{children}</thead>,
+                tbody: ({ children }) => <tbody className="divide-y divide-border/60 bg-surface-1/40">{children}</tbody>,
+                tr: ({ children }) => <tr className="hover:bg-surface-2/40 transition-colors">{children}</tr>,
+                th: ({ children }) => <th className="px-3.5 py-2 text-left font-semibold text-text-primary border-r border-border/60 last:border-r-0">{children}</th>,
+                td: ({ children }) => <td className="px-3.5 py-2 text-text-body border-r border-border/40 last:border-r-0 leading-normal">{children}</td>,
+                strong: ({ children }) => (
+                  <strong className="font-semibold text-text-primary tracking-tight">
                     {children}
-                  </CitationBadgeAnchor>
-                )
-              }
+                  </strong>
+                ),
+                h1: ({ children }) => (
+                  <h1 className="font-title text-[18px] font-semibold text-text-primary mt-3 mb-1.5 border-b border-border/40 pb-1">
+                    {children}
+                  </h1>
+                ),
+                h2: ({ children }) => (
+                  <h2 className="font-title text-[16px] font-semibold text-text-primary mt-3 mb-1">
+                    {children}
+                  </h2>
+                ),
+                h3: ({ children }) => (
+                  <h3 className="font-title text-[15px] font-medium text-accent-primary mt-2 mb-1">
+                    {children}
+                  </h3>
+                ),
+                ul: ({ children }) => <ul className="list-disc pl-5 my-2 space-y-1 text-text-body">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal pl-5 my-2 space-y-1 text-text-body">{children}</ol>,
+                li: ({ children }) => <li className="pl-0.5">{children}</li>,
+                code: ({ className, children }: any) => {
+                  const match = /language-(\w+)/.exec(className || '')
+                  const content = String(children).replace(/\n$/, '')
+                  const isMultiline = content.includes('\n')
+                  if (match || isMultiline) {
+                    return (
+                      <InteractiveCodeBlock
+                        code={content}
+                        language={match ? match[1] : 'python'}
+                      />
+                    )
+                  }
+                  if (content.includes('#cite-') || /\[.*?\]\(#cite-.*?\)/.test(content)) {
+                    const cleaned = content.replace(/\[(.*?)\]\(#cite-.*?\)/g, '$1')
+                    return (
+                      <span className="font-mono text-[11px] text-accent-primary bg-surface-2 px-1.5 py-0.5 rounded border border-border/80">
+                        {cleaned}
+                      </span>
+                    )
+                  }
+                  return (
+                    <code className="font-mono text-[13px] bg-surface-2 text-accent-primary px-1.5 py-0.5 rounded border border-border/50">
+                      {children}
+                    </code>
+                  )
+                },
+                a: ({ href, children }: any) => {
+                  const hrefStr = href || ''
+                  const childStr = String(children || '').trim()
+                  const isCitationLink =
+                    hrefStr.startsWith('#cite-') ||
+                    hrefStr.startsWith('citation://') ||
+                    /[①-⑩]/.test(childStr) ||
+                    /^\[?\d+\]?$/.test(childStr) ||
+                    (/^\[?[A-Za-z0-9_\-\.\s]+\]?$/.test(childStr) && hrefStr.startsWith('#cite'))
 
-              return (
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-accent-primary underline hover:text-accent-hover transition-colors"
-                >
-                  {children}
-                </a>
-              )
-            },
-            blockquote: ({ children }) => (
-              <blockquote className="border-l-2 border-accent-primary/60 pl-3 py-1 my-2 text-text-muted bg-surface-1/40 rounded-r text-[14px]">
-                {children}
-              </blockquote>
-            ),
-          }}
-        >
-          {processedText}
-        </ReactMarkdown>
+                  if (isCitationLink) {
+                    return (
+                      <CitationBadgeAnchor
+                        hrefStr={hrefStr}
+                        childStr={childStr}
+                        citations={message.citations}
+                        fullText={message.text}
+                        onOpenCitation={handleOpenCitation}
+                      >
+                        {children}
+                      </CitationBadgeAnchor>
+                    )
+                  }
+
+                  return (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-accent-primary underline hover:text-accent-hover transition-colors"
+                    >
+                      {children}
+                    </a>
+                  )
+                },
+                blockquote: ({ children }) => (
+                  <blockquote className="border-l-2 border-accent-primary/60 pl-3 py-1 my-2 text-text-muted bg-surface-1/40 rounded-r text-[14px]">
+                    {children}
+                  </blockquote>
+                ),
+              }}
+            >
+              {part.content}
+            </ReactMarkdown>
+          )
+        })}
       </div>
 
       {/* Sleek Gemini-style Sources Footer Bar */}

@@ -1,10 +1,22 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import ReactMarkdown from 'react-markdown'
+import remarkMath from 'remark-math'
+import remarkGfm from 'remark-gfm'
+import rehypeKatex from 'rehype-katex'
 import type { ArtifactData, ArtifactVersion } from '../../lib/types'
 import { AmberUnderline } from '../layout/AmberUnderline'
 import { api } from '../../lib/api'
 import { useWorkbench } from '../../lib/WorkbenchContext'
 import { useShikiHighlighting, detectInteractiveInputs, type ShikiToken } from '../chat/SyntaxHighlighter'
+import { InteractiveChartCard, type ChartSpec } from '../chat/InteractiveChartCard'
+
+const normalizeMarkdownTables = (rawText: string): string => {
+  if (!rawText || !rawText.includes('|')) return rawText
+  let formatted = rawText.replace(/\|\s*\|\s*(?=[^|\n]+(?:\||$))/g, '|\n|')
+  formatted = formatted.replace(/([^\n])\n(\|(?:\s*[^|\n]+\s*\|)+)\n(\|(?:\s*[-:]+[-| :]*\|)+)/g, '$1\n\n$2\n$3')
+  return formatted
+}
 
 export interface ArtifactPanelProps {
   artifact: ArtifactData
@@ -21,13 +33,36 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
 }) => {
   const { sendMessage, updateArtifactTerminal } = useWorkbench()
 
-  // Only HTML or visual web previews default to preview; all code files default to code view
+  // Detect dynamic visual analytics charts
+  const isChartArtifact =
+    artifact.title.endsWith('.chart.json') ||
+    artifact.activeFile?.endsWith('.chart.json') ||
+    Boolean(artifact.badge?.toLowerCase().includes('chart')) ||
+    artifact.files.some(f => f.name?.endsWith('.chart.json')) ||
+    Boolean(artifact.chartSpec)
+
+  // Detect visual previews (HTML/SVG) and documents (.docx, .md, reports, grounding citations)
   const isVisualComponent =
     artifact.title.endsWith('.html') ||
     artifact.title.endsWith('.svg') ||
     artifact.files.some(f => f.language === 'html' || f.language === 'svg')
 
-  const [activeTab, setActiveTab] = useState<ArtifactTab>(isVisualComponent ? 'preview' : 'code')
+  const isDocumentArtifact =
+    !isChartArtifact && (
+      artifact.title.endsWith('.docx') ||
+      artifact.title.endsWith('.doc') ||
+      artifact.title.endsWith('.md') ||
+      artifact.title.toLowerCase().includes('report') ||
+      artifact.title.toLowerCase().includes('specification') ||
+      artifact.title.toLowerCase().includes('document') ||
+      Boolean(artifact.badge?.toLowerCase().includes('word')) ||
+      Boolean(artifact.badge?.toLowerCase().includes('docx')) ||
+      Boolean(artifact.badge?.toLowerCase().includes('grounding')) ||
+      artifact.files.some(f => f.language === 'markdown') ||
+      Boolean(artifact.download_url)
+    )
+
+  const [activeTab, setActiveTab] = useState<ArtifactTab>(isVisualComponent || isDocumentArtifact || isChartArtifact ? 'preview' : 'code')
   const [selectedFile, setSelectedFile] = useState(artifact.activeFile || artifact.files[0]?.name)
   const [selectedVersion, setSelectedVersion] = useState<string>('V.3')
   const [diffViewVersion, setDiffViewVersion] = useState<ArtifactVersion | null>(null)
@@ -55,6 +90,17 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
     artifact.files.find((f) => f.name === selectedFile)?.content ||
     artifact.files[0]?.content ||
     ''
+
+  const parsedChartSpec: ChartSpec | null = useMemo(() => {
+    if (artifact.chartSpec) return artifact.chartSpec
+    try {
+      const parsed = JSON.parse(currentFileContent)
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.data)) {
+        return parsed
+      }
+    } catch {}
+    return null
+  }, [artifact.chartSpec, currentFileContent])
 
   const activeFileObj = artifact.files.find((f) => f.name === selectedFile) || artifact.files[0]
   const currentFileLang = (
@@ -311,111 +357,36 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
           </svg>
         </motion.div>
 
-        {/* Top Bar: Title, Badge, Tab Switcher, Action Tray, Close Button */}
-        <div className="flex h-12 sm:h-14 items-center justify-between border-b border-border bg-surface-1 px-3 sm:px-4 gap-1.5 overflow-hidden">
-          {/* Left: Fraunces Title + Badge */}
-          <div className="flex items-center gap-2 min-w-0 shrink">
-            <h2 className="font-display text-xs sm:text-sm font-semibold text-text-primary truncate" title={artifact.title}>
+        {/* Top Header Row 1: Title, Badge, Download, Export, Close */}
+        <div className="flex h-11 items-center justify-between border-b border-border bg-surface-1 px-3 sm:px-4 gap-2">
+          {/* Left: Icon + Title + Badge */}
+          <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+            <span className="text-sm shrink-0">
+              {isDocumentArtifact ? '📄' : isVisualComponent ? '🌐' : '⚡'}
+            </span>
+            <h2 className="font-display text-xs sm:text-sm font-semibold text-text-primary truncate max-w-[200px] sm:max-w-[320px]" title={artifact.title}>
               {artifact.title}
             </h2>
-            <span className="hidden md:inline-block font-mono text-[9px] uppercase tracking-wider text-accent-primary border border-accent-primary/40 px-1.5 py-0.5 rounded-[2px] bg-surface-2 shrink-0">
-              {artifact.badge}
-            </span>
+            {artifact.badge && (
+              <span className="font-mono text-[9px] uppercase tracking-wider text-accent-primary border border-accent-primary/40 px-1.5 py-0.5 rounded-[2px] bg-surface-2 shrink-0 truncate max-w-[180px]" title={artifact.badge}>
+                {artifact.badge}
+              </span>
+            )}
           </div>
 
-          {/* Center: Underline-style Tab Switcher */}
-          <nav aria-label="Artifact View" className="flex items-center gap-3 sm:gap-5 shrink-0">
-            {(['preview', 'code', 'terminal'] as const).map((tab) => {
-              const isActive = activeTab === tab
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => {
-                    setActiveTab(tab)
-                    setDiffViewVersion(null)
-                  }}
-                  className={`relative py-3 sm:py-4 text-xs font-medium capitalize transition-colors cursor-pointer ${
-                    isActive ? 'text-text-primary font-semibold' : 'text-text-muted hover:text-text-body'
-                  }`}
-                >
-                  <span>{tab}</span>
-                  {isActive && (
-                    <motion.span
-                      layoutId="artifact-active-tab-underline"
-                      transition={{ duration: 0.18, ease: 'easeOut' }}
-                      className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent-primary"
-                    />
-                  )}
-                </button>
-              )
-            })}
-          </nav>
-
-          {/* Right Action Tray */}
+          {/* Right Action Tray: Download, Export, Close */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Dual-Pane Code+Terminal Split Toggle */}
-            <button
-              type="button"
-              onClick={() => setIsDualSplit((prev) => !prev)}
-              className={`flex items-center gap-1 rounded-[3px] border px-2 py-1 text-[11px] font-mono transition-all cursor-pointer shrink-0 ${
-                isDualSplit
-                  ? 'border-accent-primary bg-accent-primary/20 text-accent-primary font-semibold shadow-xs'
-                  : 'border-border bg-surface-2/60 text-text-muted hover:text-text-primary hover:border-text-muted/60'
-              }`}
-              title="Toggle Dual-Pane (Side-by-Side Code & Live Terminal)"
-            >
-              <span className="text-[10px]">{isDualSplit ? '⊟' : '◫'}</span>
-              <span className="hidden md:inline">{isDualSplit ? 'Single' : 'Dual Split'}</span>
-            </button>
-
-            {/* Run in Sandbox Button */}
-            <button
-              type="button"
-              onClick={handleRunInSandbox}
-              disabled={isRunningSandbox}
-              className="flex items-center gap-1 rounded-[3px] border border-accent-primary/60 bg-accent-primary/10 hover:bg-accent-primary/20 text-accent-primary px-2 py-1 text-[11px] font-mono font-medium transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xs shrink-0"
-              title="Execute code in isolated sandbox"
-            >
-              {isRunningSandbox ? (
-                <>
-                  <svg className="animate-spin h-3 w-3 text-accent-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  <span className="hidden sm:inline">Running</span>
-                </>
-              ) : (
-                <>
-                  <span className="text-[9px]">▶</span>
-                  <span>Run</span>
-                </>
-              )}
-            </button>
-
-            {/* Explain Button */}
-            <button
-              type="button"
-              onClick={() => setShowExplainModal(true)}
-              className="italic text-text-muted hover:text-accent-primary transition-colors cursor-pointer px-1 py-1 text-[11px] shrink-0"
-              title="View algorithmic complexity & code explanation"
-            >
-              <AmberUnderline>
-                <span>Explain</span>
-              </AmberUnderline>
-            </button>
-
-            {/* Copy */}
-            <button
-              type="button"
-              onClick={handleCopyCode}
-              className="text-text-muted hover:text-text-primary transition-colors cursor-pointer px-1 py-1 text-[11px] shrink-0"
-              title="Copy source to clipboard"
-            >
-              {copied ? <span className="text-green-400 font-semibold">Copied ✓</span> : 'Copy'}
-            </button>
-
-            <span className="text-border hidden sm:inline">·</span>
+            {/* Direct Word Document Download Button */}
+            {artifact.download_url && (
+              <a
+                href={artifact.download_url}
+                download
+                className="flex items-center gap-1 rounded-[3px] bg-accent-primary text-background px-2 sm:px-2.5 py-1 text-[10.5px] font-mono font-bold hover:brightness-110 transition-all cursor-pointer shadow-xs shrink-0"
+                title="Download compiled Microsoft Word (.docx) document"
+              >
+                <span>⬇ .DOCX</span>
+              </a>
+            )}
 
             {/* Multi-Format Export Dropdown */}
             <div className="relative shrink-0">
@@ -454,24 +425,11 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95, y: 4 }}
                     transition={{ duration: 0.12, ease: 'easeOut' }}
-                    className="absolute right-0 top-full mt-1.5 z-50 w-56 rounded-[4px] border border-border bg-[#14100D] p-1.5 shadow-2xl font-mono text-xs text-text-primary select-none"
+                    className="absolute right-0 top-full mt-1.5 z-50 w-52 rounded-[4px] border border-border bg-surface-1 p-1.5 shadow-xl font-mono text-xs space-y-0.5"
                   >
-                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-text-muted/80 font-bold border-b border-border/60 mb-1">
+                    <div className="px-2 py-1 text-[10px] text-text-muted font-semibold uppercase tracking-wider border-b border-border/40 mb-1">
                       Compile &amp; Export Formats
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleCompileAndExport('pdf')}
-                      disabled={!!compilingFormat}
-                      className="w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[3px] hover:bg-surface-2 transition-colors cursor-pointer group disabled:opacity-50"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-accent-primary font-bold">[ .PDF ]</span>
-                        <span className="text-[11px] text-text-body">A4 Document</span>
-                      </div>
-                      <span className="text-[9px] text-text-muted group-hover:text-accent-primary">Print PDF</span>
-                    </button>
 
                     <button
                       type="button"
@@ -484,6 +442,19 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
                         <span className="text-[11px] text-text-body">MS Word Doc</span>
                       </div>
                       <span className="text-[9px] text-text-muted group-hover:text-blue-400">Office</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCompileAndExport('pdf')}
+                      disabled={!!compilingFormat}
+                      className="w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[3px] hover:bg-surface-2 transition-colors cursor-pointer group disabled:opacity-50"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-accent-primary font-bold">[ .PDF ]</span>
+                        <span className="text-[11px] text-text-body">A4 Document</span>
+                      </div>
+                      <span className="text-[9px] text-text-muted group-hover:text-accent-primary">Print PDF</span>
                     </button>
 
                     <button
@@ -543,7 +514,6 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
               </AnimatePresence>
             </div>
 
-
             <div className="h-4 w-[1px] bg-border mx-0.5 shrink-0" />
 
             {/* Typographic × Close button */}
@@ -555,6 +525,117 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
               title="Close Split View (Esc)"
             >
               ×
+            </button>
+          </div>
+        </div>
+
+        {/* Top Header Row 2: Tabs (Left) & Viewer Tools (Right) */}
+        <div className="flex h-10 items-center justify-between border-b border-border bg-surface-2/50 px-3 sm:px-4 gap-2">
+          {/* Left: Tabs Switcher */}
+          <nav aria-label="Artifact View" className="flex items-center gap-4 shrink-0">
+            {(['preview', 'code', 'terminal'] as const).map((tab) => {
+              if (tab === 'terminal' && isDocumentArtifact && !effectiveTerminalOutput) {
+                return null
+              }
+              const isActive = activeTab === tab
+              const tabLabel = isDocumentArtifact && tab === 'preview'
+                ? 'Document Preview'
+                : isDocumentArtifact && tab === 'code'
+                ? 'Markdown Source'
+                : tab
+
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => {
+                    setActiveTab(tab)
+                    setDiffViewVersion(null)
+                  }}
+                  className={`relative py-2.5 text-xs font-medium capitalize transition-colors cursor-pointer ${
+                    isActive ? 'text-text-primary font-semibold' : 'text-text-muted hover:text-text-body'
+                  }`}
+                >
+                  <span>{tabLabel}</span>
+                  {isActive && (
+                    <motion.span
+                      layoutId="artifact-active-tab-underline"
+                      transition={{ duration: 0.18, ease: 'easeOut' }}
+                      className="absolute bottom-0 left-0 right-0 h-[2px] bg-accent-primary"
+                    />
+                  )}
+                </button>
+              )
+            })}
+          </nav>
+
+          {/* Right Toolbar Actions */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Dual-Pane Code+Terminal Split Toggle (Only for executable code) */}
+            {!isDocumentArtifact && (
+              <button
+                type="button"
+                onClick={() => setIsDualSplit((prev) => !prev)}
+                className={`flex items-center gap-1 rounded-[3px] border px-2 py-1 text-[11px] font-mono transition-all cursor-pointer shrink-0 ${
+                  isDualSplit
+                    ? 'border-accent-primary bg-accent-primary/20 text-accent-primary font-semibold shadow-xs'
+                    : 'border-border bg-surface-2/60 text-text-muted hover:text-text-primary hover:border-text-muted/60'
+                }`}
+                title="Toggle Dual-Pane (Side-by-Side Code & Live Terminal)"
+              >
+                <span className="text-[10px]">{isDualSplit ? '⊟' : '◫'}</span>
+                <span className="hidden sm:inline">{isDualSplit ? 'Single' : 'Dual Split'}</span>
+              </button>
+            )}
+
+            {/* Run in Sandbox Button (Only for executable code) */}
+            {!isDocumentArtifact && (
+              <button
+                type="button"
+                onClick={handleRunInSandbox}
+                disabled={isRunningSandbox}
+                className="flex items-center gap-1 rounded-[3px] border border-accent-primary/60 bg-accent-primary/10 hover:bg-accent-primary/20 text-accent-primary px-2 py-1 text-[11px] font-mono font-medium transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xs shrink-0"
+                title="Execute code in isolated sandbox"
+              >
+                {isRunningSandbox ? (
+                  <>
+                    <svg className="animate-spin h-3 w-3 text-accent-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span className="hidden sm:inline">Running</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-[9px]">▶</span>
+                    <span>Run</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Explain Button */}
+            {!isDocumentArtifact && (
+              <button
+                type="button"
+                onClick={() => setShowExplainModal(true)}
+                className="italic text-text-muted hover:text-accent-primary transition-colors cursor-pointer px-1 py-1 text-[11px] shrink-0"
+                title="View algorithmic complexity & code explanation"
+              >
+                <AmberUnderline>
+                  <span>Explain</span>
+                </AmberUnderline>
+              </button>
+            )}
+
+            {/* Copy Button */}
+            <button
+              type="button"
+              onClick={handleCopyCode}
+              className="text-text-muted hover:text-text-primary transition-colors cursor-pointer px-1.5 py-1 text-[11px] font-mono shrink-0 rounded bg-surface-2/40 border border-border/40 hover:border-border"
+              title="Copy content to clipboard"
+            >
+              {copied ? <span className="text-green-400 font-semibold">Copied ✓</span> : 'Copy'}
             </button>
           </div>
         </div>
@@ -742,6 +823,70 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
                       sandbox="allow-scripts"
                       className="w-full h-full border-0"
                     />
+                  </div>
+                </div>
+              ) : isChartArtifact && parsedChartSpec ? (
+                /* Rich Interactive Dynamic Chart Viewport */
+                <div className="space-y-4 max-w-5xl mx-auto font-body">
+                  <div className="w-full min-h-[500px]">
+                    <InteractiveChartCard spec={parsedChartSpec} isExpanded={true} />
+                  </div>
+                </div>
+              ) : isDocumentArtifact ? (
+                /* Rich Formatted Document Viewport for .docx / Markdown Reports */
+                <div className="space-y-4 max-w-4xl mx-auto font-body">
+                  {/* Document Meta Banner */}
+                  <div className="rounded-[4px] border border-border bg-surface-1 p-3.5 shadow-sm flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xl">📄</span>
+                      <div>
+                        <h3 className="font-display text-xs sm:text-sm font-semibold text-text-primary">
+                          {selectedFile || artifact.title}
+                        </h3>
+                        <p className="font-body text-[11px] text-text-muted">
+                          Official On-Premise Executive Document &bull; Sovereign Grounding Verified
+                        </p>
+                      </div>
+                    </div>
+                    {artifact.download_url && (
+                      <a
+                        href={artifact.download_url}
+                        download
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-[3px] bg-accent-primary text-background text-xs font-mono font-bold hover:brightness-110 transition-all shadow-xs"
+                      >
+                        <span>⬇ Download Full .DOCX</span>
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Rendered Document Sheet */}
+                  <div className="rounded-[4px] border border-border bg-[#14100D] p-6 text-text-primary shadow-sm leading-relaxed space-y-3">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm, remarkMath]}
+                      rehypePlugins={[rehypeKatex]}
+                      components={{
+                        h1: ({ children }) => <h1 className="font-display text-lg font-bold text-text-primary border-b border-border/60 pb-2 mb-3 mt-2">{children}</h1>,
+                        h2: ({ children }) => <h2 className="font-display text-base font-semibold text-accent-primary border-b border-border/40 pb-1 mb-2 mt-4">{children}</h2>,
+                        h3: ({ children }) => <h3 className="font-display text-sm font-medium text-text-primary mb-1 mt-3">{children}</h3>,
+                        table: ({ children }) => (
+                          <div className="overflow-x-auto my-3 rounded-[3px] border border-border/80 bg-surface-1/60 shadow-2xs">
+                            <table className="min-w-full divide-y divide-border border-collapse text-[13px]">{children}</table>
+                          </div>
+                        ),
+                        thead: ({ children }) => <thead className="bg-surface-2/90 text-text-primary font-bold text-xs uppercase tracking-wider">{children}</thead>,
+                        tbody: ({ children }) => <tbody className="divide-y divide-border/60 bg-surface-1/40">{children}</tbody>,
+                        tr: ({ children }) => <tr className="hover:bg-surface-2/40 transition-colors">{children}</tr>,
+                        th: ({ children }) => <th className="px-3.5 py-2.5 text-left font-semibold text-text-primary border-r border-border/60 last:border-r-0">{children}</th>,
+                        td: ({ children }) => <td className="px-3.5 py-2 border-r border-border/40 last:border-r-0 text-text-body leading-normal">{children}</td>,
+                        blockquote: ({ children }) => <blockquote className="border-l-2 border-accent-primary pl-3 py-1 my-2 text-text-muted bg-surface-2/40 italic">{children}</blockquote>,
+                        p: ({ children }) => <p className="mb-2 text-[13.5px] leading-relaxed text-text-body">{children}</p>,
+                        ul: ({ children }) => <ul className="list-disc pl-5 my-2 space-y-1 text-[13px] text-text-body">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal pl-5 my-2 space-y-1 text-[13px] text-text-body">{children}</ol>,
+                        code: ({ children }: any) => <code className="font-mono text-xs bg-surface-2 text-accent-primary px-1.5 py-0.5 rounded border border-border/60">{children}</code>
+                      }}
+                    >
+                      {normalizeMarkdownTables(currentFileContent)}
+                    </ReactMarkdown>
                   </div>
                 </div>
               ) : (

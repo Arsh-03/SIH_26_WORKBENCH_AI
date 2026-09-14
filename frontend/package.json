@@ -19,7 +19,9 @@
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.3",
+    "recharts": "^3.10.1",
     "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "shiki": "^4.4.3",
     "tailwind-merge": "^3.6.0"

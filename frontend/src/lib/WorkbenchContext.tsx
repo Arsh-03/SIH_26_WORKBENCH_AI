@@ -565,10 +565,12 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                 })
               } else if (frame.event === 'token') {
                 if (frame.token) {
-                  liveSteps.push(`Streaming generation…`)
-                  setCurrentThinking((prev) => ({
+                  if (!liveSteps.includes('Streaming generation…')) {
+                    liveSteps.push('Streaming generation…')
+                  }
+                  setCurrentThinking(() => ({
                     duration: 'Generating output (Live Stream)…',
-                    steps: prev?.steps || liveSteps,
+                    steps: [...liveSteps],
                   }))
                 }
               } else if (frame.event === 'tool_result') {

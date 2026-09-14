@@ -103,6 +103,7 @@ export interface ArtifactData {
   terminalExitCode?: number
   terminalDurationMs?: number
   terminalCommand?: string
+  chartSpec?: any
 }
 
 export interface ChatCitationItem {

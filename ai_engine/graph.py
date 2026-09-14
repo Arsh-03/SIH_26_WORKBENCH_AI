@@ -5,11 +5,13 @@ from ai_engine.agents.chat_agent import chat_agent_node
 from ai_engine.agents.rag_agent import rag_agent_node
 from ai_engine.agents.code_agent import code_agent_node
 from ai_engine.agents.vision_agent import vision_agent_node
+from ai_engine.agents.doc_agent import doc_agent_node
+from ai_engine.agents.validator_agent import validator_agent_node
 
 class SovereignAgentWorkflow:
     """
     Multi-Agent State Machine Graph for On-Premise Sovereign AI Workbench.
-    Coordinates Supervisor, Chat, RAG, Code Sandbox, and Vision Agents.
+    Coordinates Supervisor, Chat, RAG, Code Sandbox, Doc Generation, and Validator Agents.
     """
     def __init__(self):
         self.nodes = {
@@ -18,6 +20,8 @@ class SovereignAgentWorkflow:
             "rag_agent": rag_agent_node,
             "code_agent": code_agent_node,
             "vision_agent": vision_agent_node,
+            "doc_agent": doc_agent_node,
+            "validator_agent": validator_agent_node,
         }
 
     def execute_stream(self, initial_state: AgentState) -> Generator[Dict[str, Any], None, AgentState]:

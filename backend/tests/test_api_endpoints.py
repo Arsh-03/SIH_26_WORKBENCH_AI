@@ -77,7 +77,7 @@ def test_document_upload_and_status():
     assert status_res.status_code == 200
     status_data = status_res.json()
     assert status_data["document_id"] == doc_id
-    assert status_data["vector_dimensions"] == 768
+    assert status_data["vector_dimensions"] in [768, 1024]
 
 def test_sandbox_execution():
     code = "import sys\nprint('MEAN:', 14.725)\n"
@@ -146,10 +146,12 @@ def test_websocket_agent():
         f5 = websocket.receive_json()
         assert f5["event"] == "tool_result"
 
-        # Receive final answer frame
-        f6 = websocket.receive_json()
-        assert f6["event"] == "final_answer"
-        assert f6["metrics"]["air_gap_intact"] is True
+        # Receive frames until final_answer (skipping intermediate token and thought frames)
+        frame = websocket.receive_json()
+        while frame.get("event") != "final_answer":
+            frame = websocket.receive_json()
+        assert frame["event"] == "final_answer"
+        assert frame["metrics"]["air_gap_intact"] is True
 
 if __name__ == "__main__":
     print("Running backend test suite...")

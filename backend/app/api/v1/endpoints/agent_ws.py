@@ -181,12 +181,29 @@ async def agent_websocket_endpoint(websocket: WebSocket, session_id: str):
                             except Exception as save_err:
                                 logger.error(f"Failed to auto-save model answer to DB: {save_err}")
 
-                    await agent_engine.run_agent_loop(
-                        session_id=session_id,
-                        request=run_req,
-                        db=db_session,
-                        send_frame=send_frame
-                    )
+                    try:
+                        await agent_engine.run_agent_loop(
+                            session_id=session_id,
+                            request=run_req,
+                            db=db_session,
+                            send_frame=send_frame
+                        )
+                    except Exception as loop_err:
+                        logger.error(f"Execution error in run_agent_loop for session {session_id}: {loop_err}", exc_info=True)
+                        err_msg = f"⚠️ An error occurred during agent execution: {str(loop_err)}"
+                        await send_frame({
+                            "event": "final_answer",
+                            "content": err_msg,
+                            "citations": [],
+                            "artifact": None,
+                            "metrics": {
+                                "execution_time_ms": 0,
+                                "air_gap_intact": True,
+                                "model_used": "llama3.1:8b",
+                                "model_capability": "error_recovery",
+                                "error": str(loop_err)
+                            }
+                        })
             elif action == "ping":
                 await websocket.send_json({"event": "pong", "timestamp": datetime.datetime.utcnow().isoformat() + "Z"})
             else:

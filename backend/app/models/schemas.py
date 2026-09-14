@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Union
 
 # Workspace Models
 class WorkspaceCreate(BaseModel):
@@ -131,7 +131,7 @@ class AuditTraceRecord(BaseModel):
     timestamp: str
     user_prompt_hash: str
     tools_invoked: List[str]
-    retrieved_chunk_citations: List[str]
+    retrieved_chunk_citations: List[Union[str, Dict[str, Any]]]
     external_egress_bytes: int = 0
     compliance_status: str = "AIR_GAP_PASSED"
 

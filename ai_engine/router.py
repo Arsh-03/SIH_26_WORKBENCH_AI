@@ -109,8 +109,8 @@ class DynamicModelRouter:
     ) -> tuple[ModelCapability, str]:
         prompt_clean = prompt.strip().lower()
 
-        # 1. Vision & Multimodal OCR query
-        if has_images or any(kw in prompt_clean for kw in ["image", "photo", "diagram", "schematic", "ocr", "chart", "blueprint"]):
+        # 1. Vision & Multimodal OCR query (only when image is provided or OCR scanning is requested)
+        if has_images or any(kw in prompt_clean for kw in ["ocr", "scan image", "extract text from image", "read image", "image ocr"]):
             return ModelCapability.VISION_OCR, "Prompt contains vision/diagram OCR inspection criteria"
 
         # 2. Check for explicit document creation/drafting/export requests
@@ -120,7 +120,7 @@ class DynamicModelRouter:
         ]) or prompt_clean.endswith("?")
 
         doc_create_verbs = ["create", "generate", "draft", "compile", "build", "write", "export", "save as", "produce", "make a"]
-        doc_create_nouns = ["doc", "document", "docx", "word doc", "formal report", "written memo", "full sop"]
+        doc_create_nouns = ["doc", "document", "docx", "word doc", "report", "formal report", "written memo", "memo", "full sop", "specification"]
         is_explicit_doc_creation = (any(v in prompt_clean for v in doc_create_verbs) and any(n in prompt_clean for n in doc_create_nouns)) or any(phrase in prompt_clean for phrase in ["save as doc", "save the output", "save in doc", "generate doc", "create doc", "draft report", "export to docx", "save as word"])
 
         if is_explicit_doc_creation and not is_question:
@@ -214,31 +214,51 @@ class DynamicModelRouter:
         prompt: str,
         active_document_ids: Optional[List[str]] = None,
         has_images: bool = False,
-        available_models: Optional[List[str]] = None
+        available_models: Optional[List[str]] = None,
+        running_models: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         capability, reason = self.classify_capability(prompt, active_document_ids, has_images)
-        return self._build_routing_result(capability, reason, available_models)
+        return self._build_routing_result(capability, reason, available_models, running_models)
 
     async def route_query_async(
         self,
         prompt: str,
         active_document_ids: Optional[List[str]] = None,
         has_images: bool = False,
-        available_models: Optional[List[str]] = None
+        available_models: Optional[List[str]] = None,
+        running_models: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         capability, reason = await self.classify_capability_llm(prompt, active_document_ids, has_images)
-        return self._build_routing_result(capability, reason, available_models)
+        return self._build_routing_result(capability, reason, available_models, running_models)
 
     def _build_routing_result(
         self,
         capability: ModelCapability,
         reason: str,
-        available_models: Optional[List[str]] = None
+        available_models: Optional[List[str]] = None,
+        running_models: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         profile = self.registry.get_profile(capability)
         target_model = profile.name
         fallback_chain = [target_model]
 
+        # 1. Zero-Swapping Warm Model Affinity (Crucial for Google Colab & On-Premise GPU VRAM)
+        # If a capable generalist model is already loaded in GPU memory, reuse it for text/doc/reasoning
+        # to eliminate the 8-15s VRAM model eviction & reload delay.
+        if running_models and len(running_models) > 0 and capability != ModelCapability.VISION_OCR:
+            is_target_already_warm = any(target_model.lower() in rm.lower() or rm.lower() in target_model.lower() for rm in running_models)
+            if not is_target_already_warm:
+                # Find best resident candidate
+                warm_candidate = next((rm for rm in running_models if any(k in rm.lower() for k in ["llama", "qwen", "mistral", "deepseek"])), running_models[0])
+                if warm_candidate:
+                    logger.info(
+                        f"Zero-Swapping Optimizer: Reusing warm model '{warm_candidate}' in GPU VRAM "
+                        f"instead of cold-loading '{target_model}' for '{capability.value}'."
+                    )
+                    reason += f" [Warm VRAM Affinity: Reusing active '{warm_candidate}']"
+                    target_model = warm_candidate
+
+        # 2. Availability & Fallback Check
         if available_models and len(available_models) > 0:
             is_available = any(target_model.lower() in m.lower() or m.lower() in target_model.lower() for m in available_models)
             if not is_available:

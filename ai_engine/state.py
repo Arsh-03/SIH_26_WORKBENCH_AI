@@ -18,4 +18,6 @@ class AgentState(TypedDict):
     model_capability: Optional[str]
     routing_reason: Optional[str]
     fallback_chain: Optional[List[str]]
+    available_models: Optional[List[str]]
+    running_models: Optional[List[str]]
 
