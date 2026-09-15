@@ -36,7 +36,7 @@ def _build_supervisor_response(routing_res: Dict[str, Any], prompt: str, active_
             plan.append("rag_agent")
 
         # 2. Code Execution & Physics Simulation Agent (Sandbox)
-        code_keywords = ["simulate", "simulation", "degradation", "execute", "benchmark", "python script", "calculate and plot", "formula execution"]
+        code_keywords = ["simulate", "simulation", "stimulate", "stimulative", "degradation", "execute", "benchmark", "python script", "calculate and plot", "formula execution"]
         has_code_intent = (
             routing_res.get("capability") == "coding" or 
             any(kw in prompt_low for kw in code_keywords)
@@ -48,7 +48,8 @@ def _build_supervisor_response(routing_res: Dict[str, Any], prompt: str, active_
         analytics_keywords = [
             "chart", "bar chart", "line chart", "pie chart", "area chart",
             "plot", "graph", "trend", "breakdown", "distribution", "visualize",
-            "analytics", "visual analytics", "comparison chart", "time series"
+            "analytics", "visual analytics", "comparison chart", "time series",
+            "stimulate", "stimulative", "interactive graph", "interactive chart"
         ]
         if any(kw in prompt_low for kw in analytics_keywords):
             plan.append("analytics_agent")
@@ -66,7 +67,8 @@ def _build_supervisor_response(routing_res: Dict[str, Any], prompt: str, active_
         physics_keywords = [
             "asme", "wall thickness", "stress", "creep", "larson-miller", "darcy",
             "lmtd", "hydraulics", "mawp", "rupture life", "hoop stress", "burst pressure",
-            "safety factor", "ug-27", "heat duty", "corrosion allowance"
+            "safety factor", "ug-27", "heat duty", "corrosion allowance", "pressure vs temperature",
+            "operating temperature"
         ]
         if any(kw in prompt_low for kw in physics_keywords):
             plan.append("physics_agent")

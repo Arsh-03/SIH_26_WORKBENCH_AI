@@ -18,6 +18,7 @@ import {
 import { useWorkbench } from '../../lib/WorkbenchContext'
 import { useAuth } from '../../lib/AuthContext'
 import { api, type SystemHealth, type HardwareTelemetry } from '../../lib/api'
+import { getKeybindingDisplay } from '../../lib/keybindings'
 import { AmberUnderline } from './AmberUnderline'
 
 export interface SidebarProps {
@@ -55,7 +56,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const location = useLocation()
   const navigate = useNavigate()
   const { user: authUser, logout } = useAuth()
-  const { chatSessions, loadChatSession, isSidebarOpen, toggleSidebar, togglePinChat, openSettings, isSettingsOpen } = useWorkbench()
+  const { chatSessions, loadChatSession, isSidebarOpen, toggleSidebar, togglePinChat, openSettings, isSettingsOpen, keybindings } = useWorkbench()
 
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null)
   const [hardwareTelemetry, setHardwareTelemetry] = useState<HardwareTelemetry | null>(null)
@@ -80,11 +81,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         .then((data) => {
           if (mounted) setSystemHealth(data)
         })
-        .catch(() => {})
+        .catch(() => {
+          if (mounted) {
+            setSystemHealth({
+              ollama_running: false,
+              available_models: [],
+            })
+          }
+        })
     }
 
     fetchTelemetry()
-    const interval = setInterval(fetchTelemetry, 5000)
+    const interval = setInterval(fetchTelemetry, 4000)
 
     return () => {
       mounted = false
@@ -98,7 +106,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       .catch(() => {})
     api.getSystemHealth()
       .then((data) => setSystemHealth(data))
-      .catch(() => {})
+      .catch(() => {
+        setSystemHealth({
+          ollama_running: false,
+          available_models: [],
+        })
+      })
   }
 
   const handleDownloadSessionBundle = async () => {
@@ -156,13 +169,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ? 'settings'
               : '')
 
-  const isOnline = systemHealth?.ollama_running ?? true
+  const isOnline = Boolean(systemHealth?.ollama_running)
   const vramTotal = systemHealth?.gpu_telemetry?.total_vram_mb || 0
   const vramAlloc = systemHealth?.gpu_telemetry?.allocated_vram_mb || 0
   const deviceName = systemHealth?.gpu_telemetry?.device_name || 'Host CPU / RAM Memory Enclave'
-  const availableModels = systemHealth?.available_models?.length
-    ? systemHealth.available_models
-    : ['qwen2.5-coder:7b', 'llama3.2-vision:latest', 'nomic-embed-text:latest']
+  const availableModels = systemHealth?.available_models || []
 
   const renderStatusHUD = (isCompact: boolean) => {
     const gpuName = hardwareTelemetry?.gpu?.gpu_name || deviceName
@@ -174,7 +185,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const ramTot = hardwareTelemetry?.ram_total_gb ?? 32.0
     const ramPct = hardwareTelemetry?.ram_percent ?? Math.round((ramUsed / (ramTot || 1)) * 100)
     const cpuPct = hardwareTelemetry?.cpu_percent ?? 14.2
-    const tps = hardwareTelemetry?.tokens_per_second ?? 42.5
+    const tps = hardwareTelemetry?.tokens_per_second ?? (isOnline ? 42.5 : 0)
 
     return (
       <AnimatePresence>
@@ -194,15 +205,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex items-center justify-between border-b border-border/80 pb-2 mb-2">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="relative flex h-2 w-2 shrink-0">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? 'bg-green-400' : 'bg-amber-400'} opacity-75`} />
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-green-500' : 'bg-amber-500'}`} />
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'} opacity-75`} />
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                 </span>
                 <span className="font-semibold text-[10px] uppercase tracking-wider text-text-primary truncate">
-                  Sovereign Enclave Status
+                  {isOnline ? 'Sovereign Enclave Active' : 'Ollama Disconnected'}
                 </span>
               </div>
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/30 font-bold shrink-0">
-                AIR-GAPPED
+              <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 border ${
+                isOnline
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                  : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+              }`}>
+                {isOnline ? 'AIR-GAPPED' : 'OFFLINE'}
               </span>
             </div>
 
@@ -213,7 +228,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <span className="font-semibold text-accent-primary uppercase tracking-wider flex items-center gap-1">
                     <span>⚡</span> GPU Acceleration
                   </span>
-                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${gpuTemp > 75 ? 'bg-red-500/20 text-red-400' : gpuTemp > 60 ? 'bg-amber-500/20 text-amber-400' : 'bg-green-500/20 text-green-400'}`}>
+                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${gpuTemp > 75 ? 'bg-red-500/20 text-red-400' : gpuTemp > 60 ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
                     {gpuTemp}°C
                   </span>
                 </div>
@@ -269,19 +284,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {/* Models List */}
               <div className="rounded-[4px] border border-border/60 bg-[#1D1712] p-2 space-y-1">
                 <div className="flex items-center justify-between text-[10px] text-text-muted uppercase">
-                  <span className="font-semibold text-text-muted">Active Models ({availableModels.length})</span>
-                  <span className="text-green-400 font-bold text-[9px]">ENCLAVE</span>
+                  <span className="font-semibold text-text-muted">
+                    {isOnline ? `Active Models (${availableModels.length})` : 'Models Offline (0)'}
+                  </span>
+                  <span className={`font-bold text-[9px] ${isOnline ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {isOnline ? 'ENCLAVE' : 'DISCONNECTED'}
+                  </span>
                 </div>
-                <div className="flex flex-wrap gap-1 max-h-14 overflow-y-auto pt-0.5">
-                  {availableModels.map((m) => (
-                    <span
-                      key={m}
-                      className="text-[9px] px-1.5 py-0.5 rounded bg-surface-2 text-text-primary border border-border/80 font-mono truncate max-w-full"
-                    >
-                      {m}
-                    </span>
-                  ))}
-                </div>
+                {availableModels.length > 0 ? (
+                  <div className="flex flex-wrap gap-1 max-h-14 overflow-y-auto pt-0.5">
+                    {availableModels.map((m) => (
+                      <span
+                        key={m}
+                        className="text-[9px] px-1.5 py-0.5 rounded bg-surface-2 text-text-primary border border-border/80 font-mono truncate max-w-full"
+                      >
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-text-muted italic py-1">
+                    {isOnline ? 'No models currently loaded in Ollama.' : 'Ollama server is offline. Local fallback active.'}
+                  </div>
+                )}
               </div>
 
               {/* Zero-Egress Guarantee & One-Click ZIP Export */}
@@ -338,7 +363,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={toggleSidebar}
-            title="Expand Sidebar (⌘B)"
+            title={`Expand Sidebar (${getKeybindingDisplay(keybindings, 'toggle_sidebar', '⌘B')})`}
             aria-label="Expand Sidebar"
             className="group flex flex-col items-center justify-center p-1.5 rounded-[4px] hover:bg-surface-2 transition-colors cursor-pointer"
           >
@@ -357,7 +382,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={onNewChat}
-            title="New Chat (⌘N)"
+            title={`New Chat (${getKeybindingDisplay(keybindings, 'new_chat', '⌘N')})`}
             aria-label="New Chat"
             className="group relative flex h-8 w-8 items-center justify-center rounded-[4px] border border-accent-primary/40 bg-accent-primary/10 text-accent-primary transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer shadow-xs motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] hover:bg-accent-primary/25 hover:border-accent-primary hover:shadow-[0_0_12px_rgba(217,122,63,0.3)] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06]"
           >
@@ -370,7 +395,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={onOpenCmdPalette}
-            title="Search Chats (⌘K)"
+            title={`Search Chats (${getKeybindingDisplay(keybindings, 'open_palette', '⌘K')})`}
             aria-label="Search Chats"
             className="group relative flex h-8 w-8 items-center justify-center rounded-[4px] border border-border/80 bg-surface-2/60 text-text-muted transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] hover:text-text-primary hover:border-accent-primary/50 hover:bg-surface-2 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06]"
           >
@@ -447,7 +472,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Bottom: Air-Gap Status + Settings + Logout + User Avatar */}
         <div className="relative flex flex-col items-center gap-2.5">
-          {/* Air-Gap Status Green Dot with Hover HUD */}
+          {/* Air-Gap Status Indicator with Hover HUD */}
           <div
             onMouseEnter={() => {
               setShowStatusHover(true)
@@ -455,22 +480,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }}
             onMouseLeave={() => setShowStatusHover(false)}
             className="flex items-center justify-center p-1.5 cursor-pointer rounded hover:bg-surface-2 transition-colors relative"
-            title="Hover for Ollama & Enclave Telemetry"
+            title={isOnline ? 'Ollama Inference Active (Air-Gapped Enclave)' : 'Ollama Service Disconnected (Offline)'}
           >
             <span className="relative flex h-2 w-2">
-              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? 'bg-green-400' : 'bg-amber-400'} opacity-75`} />
-              <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-green-500' : 'bg-amber-500'}`} />
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'} opacity-75`} />
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
             </span>
           </div>
 
           {/* Render hover HUD */}
           {renderStatusHUD(true)}
 
-          {/* Settings (Strong Right Breakout) */}
+          {/* Settings */}
           <button
             type="button"
             onClick={openSettings}
-            title="Settings (⌘,)"
+            title={`Settings (${getKeybindingDisplay(keybindings, 'toggle_settings', '⌘,')})`}
             aria-label="Settings"
             className={`group relative flex h-7 w-7 items-center justify-center rounded transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06] ${
               isSettingsOpen
@@ -561,7 +586,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span className="tracking-tight inline-block transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-0.5 motion-safe:group-focus-visible:translate-x-0.5">New Chat</span>
               </button>
             </AmberUnderlineWrapper>
-            <span className="font-mono text-[11px] text-text-muted">⌘N</span>
+            <span className="font-mono text-[11px] text-text-muted">
+              {getKeybindingDisplay(keybindings, 'new_chat', '⌘N')}
+            </span>
           </div>
 
           {/* Search Trigger Button */}
@@ -579,7 +606,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="font-body text-xs inline-block transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-0.5 motion-safe:group-focus-visible:translate-x-0.5">Search chats</span>
             </div>
             <kbd className="rounded border border-border/90 bg-surface-1 px-1.5 py-0.5 font-mono text-[10px] text-text-body uppercase tracking-wider group-hover:border-accent-primary/30 transition-colors">
-              ⌘K
+              {getKeybindingDisplay(keybindings, 'open_palette', '⌘K')}
             </kbd>
           </button>
 
@@ -818,7 +845,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span className="font-body text-xs font-medium text-text-primary leading-none truncate">
                   {activeUserProfile.name}
                 </span>
-                {/* Live Air-Gap Status Green Dot */}
+                {/* Live Air-Gap Status Indicator */}
                 <div
                   onMouseEnter={() => {
                     setShowStatusHover(true)
@@ -826,11 +853,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   }}
                   onMouseLeave={() => setShowStatusHover(false)}
                   className="flex items-center justify-center p-0.5 cursor-pointer rounded hover:bg-surface-2 transition-colors"
-                  title="Hover for Ollama & Enclave Telemetry"
+                  title={isOnline ? 'Ollama Inference Active (Air-Gapped Enclave)' : 'Ollama Service Disconnected (Offline)'}
                 >
                   <span className="relative flex h-2 w-2">
-                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? 'bg-green-400' : 'bg-amber-400'} opacity-75`} />
-                    <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-green-500' : 'bg-amber-500'}`} />
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'} opacity-75`} />
+                    <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                   </span>
                 </div>
               </div>

@@ -77,42 +77,46 @@ class OllamaClient:
             logger.error(f"Ollama chat streaming error with model {target_model}: {e}")
 
     async def check_health(self) -> Dict[str, Any]:
-
         """Check if local/remote Ollama server is running and get available & warm/resident models."""
         import time
         now = time.time()
-        if self._cached_health and (now - self._cached_health_time) < 5.0:
+        if self._cached_health and (now - self._cached_health_time) < 3.0:
             return self._cached_health
 
         try:
-            async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=5.0) as client:
+            async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=3.0) as client:
                 res = await client.get(f"{self.base_url}/api/tags")
                 if res.status_code == 200:
                     data = res.json()
-                    models = [m.get("name", "") for m in data.get("models", [])]
-                    
-                    # Inspect active/warm models in GPU VRAM via /api/ps
-                    running_models = []
-                    try:
-                        ps_res = await client.get(f"{self.base_url}/api/ps")
-                        if ps_res.status_code == 200:
-                            ps_data = ps_res.json()
-                            running_models = [m.get("name", "") for m in ps_data.get("models", [])]
-                    except Exception:
-                        pass
+                    if isinstance(data, dict) and "models" in data:
+                        models = [m.get("name", "") for m in data.get("models", []) if isinstance(m, dict) and m.get("name")]
+                        
+                        # Inspect active/warm models in GPU VRAM via /api/ps
+                        running_models = []
+                        try:
+                            ps_res = await client.get(f"{self.base_url}/api/ps")
+                            if ps_res.status_code == 200:
+                                ps_data = ps_res.json()
+                                if isinstance(ps_data, dict):
+                                    running_models = [m.get("name", "") for m in ps_data.get("models", []) if isinstance(m, dict) and m.get("name")]
+                        except Exception:
+                            pass
 
-                    res_dict = {
-                        "running": True,
-                        "available_models": models,
-                        "running_models": running_models
-                    }
-                    self._cached_health = res_dict
-                    self._cached_health_time = now
-                    return res_dict
-
+                        res_dict = {
+                            "running": True,
+                            "available_models": models,
+                            "running_models": running_models
+                        }
+                        self._cached_health = res_dict
+                        self._cached_health_time = now
+                        return res_dict
         except Exception as e:
             logger.debug(f"Ollama server not reachable: {e}")
-        return {"running": False, "available_models": [], "running_models": []}
+
+        failed_dict = {"running": False, "available_models": [], "running_models": []}
+        self._cached_health = failed_dict
+        self._cached_health_time = now
+        return failed_dict
 
 
     def _generate_fallback_embedding(self, text: str, dimensions: int = 768) -> List[float]:

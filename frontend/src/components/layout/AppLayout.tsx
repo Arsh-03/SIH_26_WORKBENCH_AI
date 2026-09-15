@@ -5,12 +5,13 @@ import { FilmGrain } from './FilmGrain'
 import { Sidebar } from './Sidebar'
 import { CommandPalette } from './CommandPalette'
 import { SettingsPage } from '../../routes/SettingsPage'
+import { KeyboardShortcutsModal } from './KeyboardShortcutsModal'
 import { useWorkbench } from '../../lib/WorkbenchContext'
 
 /**
  * AppLayout
  * Persistent layout wrapper housing the film-grain overlay,
- * the Sidebar navigation, global Command Palette (⌘K), Settings Modal (⌘,), and outlet for active routes.
+ * the Sidebar navigation, global Command Palette (⌘K), Settings Modal (⌘,), Keyboard Shortcuts (⌘/), and outlet for active routes.
  */
 export const AppLayout: React.FC = () => {
   const {
@@ -18,6 +19,8 @@ export const AppLayout: React.FC = () => {
     setIsCmdPaletteOpen,
     isSettingsOpen,
     closeSettings,
+    isShortcutsOpen,
+    closeShortcuts,
     resetToNewChat,
     isSidebarOpen,
   } = useWorkbench()
@@ -61,6 +64,12 @@ export const AppLayout: React.FC = () => {
         isOpen={isSettingsOpen}
         onClose={closeSettings}
         isModal={true}
+      />
+
+      {/* Global Keyboard Shortcuts Reference & Config Modal */}
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsOpen}
+        onClose={closeShortcuts}
       />
 
       {/* Main content area */}

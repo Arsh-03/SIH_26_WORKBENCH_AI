@@ -136,6 +136,12 @@ export const mockCommandPaletteItems: CommandPaletteItem[] = [
     category: 'COMMANDS',
     shortcut: '⌘,',
   },
+  {
+    id: 'cmd-act-shortcuts',
+    title: 'Keyboard Shortcuts & Keybindings',
+    category: 'COMMANDS',
+    shortcut: '⌘/',
+  },
 ]
 
 export const mockSuggestionCards: SuggestionCardData[] = [

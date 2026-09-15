@@ -122,6 +122,18 @@ export const InteractiveChartCard: React.FC<InteractiveChartCardProps> = ({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const xAxisKey = useMemo(() => {
+    if (spec.xAxisKey) return spec.xAxisKey;
+    if (!spec.data || spec.data.length === 0) return "category";
+    const firstRow = spec.data[0];
+    if ("name" in firstRow) return "name";
+    const keys = Object.keys(firstRow);
+    const candidate = keys.find((k) =>
+      /^(temp|temperature|time|date|timestamp|hour|day|unit|category|x|step)/i.test(k)
+    );
+    return candidate || keys[0] || "category";
+  }, [spec.xAxisKey, spec.data]);
+
   // Standard series list in stable, fixed order
   const rawSeriesList = useMemo(() => {
     if (spec.series && spec.series.length > 0) {
@@ -133,7 +145,10 @@ export const InteractiveChartCard: React.FC<InteractiveChartCardProps> = ({
     if (spec.data && spec.data.length > 0) {
       const firstRow = spec.data[0];
       const keys = Object.keys(firstRow).filter(
-        (k) => k !== (spec.xAxisKey || "name") && typeof firstRow[k] === "number"
+        (k) =>
+          k !== xAxisKey &&
+          (typeof firstRow[k] === "number" ||
+            (!isNaN(Number(firstRow[k])) && typeof firstRow[k] !== "boolean"))
       );
       return keys.map((k, idx) => ({
         key: k,
@@ -142,7 +157,7 @@ export const InteractiveChartCard: React.FC<InteractiveChartCardProps> = ({
       }));
     }
     return [];
-  }, [spec]);
+  }, [spec, xAxisKey]);
 
   // Track active/visible series or categories
   const [hiddenKeys, setHiddenKeys] = useState<Record<string, boolean>>({});
@@ -150,12 +165,6 @@ export const InteractiveChartCard: React.FC<InteractiveChartCardProps> = ({
   const toggleKey = (key: string) => {
     setHiddenKeys((prev) => ({ ...prev, [key]: !prev[key] }));
   };
-
-  const xAxisKey =
-    spec.xAxisKey ||
-    (spec.data && spec.data.length > 0 && "name" in spec.data[0]
-      ? "name"
-      : Object.keys(spec.data?.[0] || {})[0] || "category");
 
   // Detect whether data is a single-row wide breakdown (e.g. { Methane: 85, Ethane: 9, ... })
   const isSingleRowBreakdown = useMemo(() => {

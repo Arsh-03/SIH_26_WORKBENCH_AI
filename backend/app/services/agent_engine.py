@@ -727,8 +727,9 @@ class AgentExecutionEngine:
         # Check for dynamic visual analytics charts
         chart_specs = extract_chart_specs(model_response)
         if chart_specs:
-            # If chart was synthesized because :::chart was omitted by the LLM, inject :::chart into response
-            if ":::chart" not in model_response:
+            # If chart was synthesized because directive was omitted by the LLM, inject :::chart into response
+            has_existing_chart_block = bool(re.search(r":::(?:chart|graph|plot|visualization|stimulative|stimulate|simulation|simulate|interactive|analytics)\s*[\s\S]*?:::", model_response, re.IGNORECASE))
+            if not has_existing_chart_block:
                 model_response += "\n\n:::chart\n" + json.dumps(chart_specs[0], indent=2) + "\n:::\n"
 
             tools_called_log.append("generate_dynamic_chart")

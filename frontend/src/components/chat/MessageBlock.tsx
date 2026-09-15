@@ -218,12 +218,12 @@ interface ContentPart {
 }
 
 /**
- * Splits text into markdown text segments and dynamic :::chart, :::economics, :::physics, :::output, and :::pid blocks.
+ * Splits text into markdown text segments and dynamic :::chart, :::economics, :::physics, :::output, :::pid, and aliased :::stimulative blocks.
  */
 const parseContentWithCharts = (text: string): ContentPart[] => {
   if (!text) return [{ type: 'text', content: '' }]
 
-  const regex = /:::(chart|economics|physics|output|pid)\s*([\s\S]*?):::/g
+  const regex = /:::(chart|economics|physics|output|pid|stimulative|stimulate|simulation|simulate|interactive|graph|plot|visualization|analytics|asme)\s*([\s\S]*?):::/gi
   const parts: ContentPart[] = []
   let lastIndex = 0
   let match: RegExpExecArray | null
@@ -247,7 +247,10 @@ const parseContentWithCharts = (text: string): ContentPart[] => {
         parsed = JSON.parse(rawJson)
       } catch {
         try {
-          const fixed = rawJson.replace(/,\s*([}\]])/g, '$1')
+          const fixed = rawJson
+            .replace(/,\s*([}\]])/g, '$1')
+            .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2":')
+            .replace(/:\s*'([^']*)'/g, ':"$1"')
           parsed = JSON.parse(fixed)
         } catch {
           parsed = null
@@ -255,14 +258,37 @@ const parseContentWithCharts = (text: string): ContentPart[] => {
       }
 
       if (parsed && typeof parsed === 'object') {
-        if (blockType === 'chart' && Array.isArray(parsed.data)) {
-          parts.push({ type: 'chart', chartSpec: parsed })
-        } else if (blockType === 'economics') {
-          parts.push({ type: 'economics', economicsSpec: parsed })
-        } else if (blockType === 'physics') {
-          parts.push({ type: 'physics', physicsSpec: parsed })
-        } else if (blockType === 'pid') {
+        if (blockType === 'pid' || (parsed.nodes && parsed.pipes) || (parsed.equipment && parsed.nodes)) {
           parts.push({ type: 'pid', pidSpec: parsed })
+        } else if (
+          blockType === 'physics' ||
+          blockType === 'asme' ||
+          parsed.formulaLatex ||
+          parsed.marginOfSafety !== undefined ||
+          (parsed.inputs && parsed.results && (parsed.standard || parsed.safetyAssessment))
+        ) {
+          parts.push({ type: 'physics', physicsSpec: parsed })
+        } else if (
+          blockType === 'economics' ||
+          parsed.headlineMetric ||
+          parsed.costBreakdown ||
+          parsed.annualizedCapEx ||
+          parsed.opexBreakdown
+        ) {
+          parts.push({ type: 'economics', economicsSpec: parsed })
+        } else if (Array.isArray(parsed.data)) {
+          parts.push({ type: 'chart', chartSpec: parsed })
+        } else if (parsed.series && typeof parsed.data === 'object') {
+          const dataArray = Array.isArray(parsed.data) ? parsed.data : [parsed.data]
+          parts.push({ type: 'chart', chartSpec: { ...parsed, data: dataArray } })
+        } else if (['chart', 'stimulative', 'stimulate', 'simulation', 'simulate', 'interactive', 'graph', 'plot', 'visualization', 'analytics'].includes(blockType)) {
+          if (parsed.data && Array.isArray(parsed.data)) {
+            parts.push({ type: 'chart', chartSpec: parsed })
+          } else if (parsed.inputs && parsed.results) {
+            parts.push({ type: 'physics', physicsSpec: parsed })
+          } else {
+            parts.push({ type: 'text', content: '```json\n' + rawJson + '\n```' })
+          }
         } else {
           parts.push({ type: 'text', content: '```json\n' + rawJson + '\n```' })
         }
