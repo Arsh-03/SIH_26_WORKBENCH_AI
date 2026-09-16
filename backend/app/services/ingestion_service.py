@@ -7,6 +7,7 @@ from backend.app.core.security import generate_id
 from backend.app.models.sql_models import Document, DocumentChunk
 from backend.app.services.ollama_client import ollama_client
 from backend.app.services.vector_store import vector_store_service
+from backend.app.services.cv_client import cv_client
 
 logger = logging.getLogger("ingestion_service")
 
@@ -40,15 +41,61 @@ class DocumentIngestionService:
 
         return chunks
 
-    def extract_text_and_chunks_from_file(self, filepath: str, file_type: str) -> Tuple[List[Dict[str, Any]], int]:
+    async def _process_via_cv_client(self, filepath: str) -> Tuple[List[Dict[str, Any]], int]:
         """
-        Extract text from file using PyMuPDF for PDFs or native parsers for text/CSV/code.
+        Helper method to invoke CVClient worker and format page OCR/tables into chunk dictionaries.
+        """
+        all_chunks: List[Dict[str, Any]] = []
+        cv_res = await cv_client.run_cv_runner(input_path=filepath, confidence=0.40)
+
+        if cv_res.status != "success" or not cv_res.pages:
+            raise RuntimeError(f"CVClient runner failed or returned empty payload: {cv_res.errors}")
+
+        for page_info in cv_res.pages:
+            p_num = page_info.page_number
+            page_text_blocks = [b.text for b in page_info.text_blocks if b.text.strip()]
+            combined_text = " ".join(page_text_blocks)
+
+            # Append Markdown representation of extracted tables
+            if page_info.tables:
+                table_mds = []
+                for tbl in page_info.tables:
+                    md_str = tbl.get("markdown", "")
+                    if md_str:
+                        table_mds.append(f"\n\n### Extracted Table\n{md_str}")
+                if table_mds:
+                    combined_text = (combined_text + "\n" + "\n".join(table_mds)).strip()
+
+            if combined_text:
+                page_chunks = self.chunk_text(combined_text, page_number=p_num)
+                all_chunks.extend(page_chunks)
+
+        return all_chunks, cv_res.total_pages
+
+    async def extract_text_and_chunks_from_file(self, filepath: str, file_type: str) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Extract text from file using PyMuPDF for PDFs (fast path), CVClient OCR for scanned/image PDFs & image files,
+        or native parsers for plain text/CSV/code.
         Returns a list of chunk dictionaries and total page count.
         """
         all_chunks: List[Dict[str, Any]] = []
         total_pages = 1
+        clean_ext = file_type.lower().lstrip(".")
 
-        if file_type.lower() in ["pdf", ".pdf", "application/pdf"]:
+        image_extensions = {"png", "jpg", "jpeg", "tiff", "bmp", "webp", "image/png", "image/jpeg"}
+
+        # 1. IMAGE FILES: Always use CVClient OCR & spatial layout extraction
+        if clean_ext in image_extensions or file_type.lower() in image_extensions:
+            try:
+                logger.info(f"Triggering CVClient OCR path for image document: {filepath}")
+                return await self._process_via_cv_client(filepath)
+            except Exception as e:
+                logger.warning(f"CVClient image OCR failed for {filepath}: {e}. Returning empty text fallback for image.")
+                return [], 1
+
+
+        # 2. PDF FILES: Evaluate PyMuPDF fast path vs CVClient OCR path
+        if clean_ext in ["pdf", "application/pdf"] or file_type.lower() in ["pdf", ".pdf", "application/pdf"]:
             fitz = None
             try:
                 import pymupdf as fitz
@@ -58,6 +105,10 @@ class DocumentIngestionService:
                 except ImportError:
                     pass
 
+            native_chunks: List[Dict[str, Any]] = []
+            total_extracted_chars = 0
+            has_tables_detected = False
+
             if fitz:
                 try:
                     doc = fitz.open(filepath)
@@ -66,29 +117,65 @@ class DocumentIngestionService:
                         page = doc[page_num]
                         text = page.get_text("text")
                         if text.strip():
+                            total_extracted_chars += len(text.strip())
                             page_chunks = self.chunk_text(text, page_number=page_num + 1)
-                            all_chunks.extend(page_chunks)
+                            native_chunks.extend(page_chunks)
+
+                        # Quick check for table vector graphics or table bounding structures
+                        if hasattr(page, "find_tables"):
+                            try:
+                                tabs = page.find_tables()
+                                if tabs and len(tabs.tables) > 0:
+                                    has_tables_detected = True
+                            except Exception:
+                                pass
                     doc.close()
                 except Exception as e:
                     logger.error(f"Error extracting PDF text from {filepath}: {e}")
-            else:
-                logger.warning("PyMuPDF (fitz) not installed. Using raw text parser fallback for PDF.")
-                try:
-                    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                        text = f.read()
-                    all_chunks = self.chunk_text(text, page_number=1)
-                except Exception as e:
-                    logger.error(f"Error extracting PDF fallback: {e}")
-        else:
 
-            # For plain text, markdown, CSV, logs, etc.
+            # DETERMINISTIC TRIGGER CONDITION:
+            # Trigger CVClient if:
+            # a) Total native extracted text is extremely low (< 50 chars) -> Scanned / Image PDF
+            # b) Average chars per page < 20
+            # c) PDF contains complex tables where structured pdfplumber table extraction is beneficial
+            avg_chars = total_extracted_chars / max(1, total_pages)
+            should_trigger_cv = (total_extracted_chars < 50) or (avg_chars < 20) or has_tables_detected
+
+            if should_trigger_cv:
+                trigger_reason = (
+                    "scanned/image PDF (total_chars < 50)" if total_extracted_chars < 50
+                    else f"low text density (avg_chars={avg_chars:.1f})" if avg_chars < 20
+                    else "structured tables detected"
+                )
+                logger.info(f"Triggering CVClient path for PDF ({trigger_reason}): {filepath}")
+                try:
+                    cv_chunks, cv_pages = await self._process_via_cv_client(filepath)
+                    if cv_chunks:
+                        return cv_chunks, cv_pages
+                    logger.warning(f"CVClient returned no chunks for {filepath}. Falling back to PyMuPDF native chunks.")
+                except Exception as e:
+                    logger.warning(f"CVClient processing failed for PDF {filepath}: {e}. Falling back to PyMuPDF native chunks.")
+
+            # Fast path or fallback: Return PyMuPDF native chunks if available
+            if native_chunks:
+                return native_chunks, total_pages
+
+            # Final fallback for PDF
             try:
                 with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                     text = f.read()
-                all_chunks = self.chunk_text(text, page_number=1)
-                total_pages = 1
-            except Exception as e:
-                logger.error(f"Error extracting text from {filepath}: {e}")
+                return self.chunk_text(text, page_number=1), total_pages
+            except Exception:
+                return [], total_pages
+
+        # 3. PLAIN TEXT / MARKDOWN / CODE / CSV FILES
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                text = f.read()
+            all_chunks = self.chunk_text(text, page_number=1)
+            total_pages = 1
+        except Exception as e:
+            logger.error(f"Error extracting text from {filepath}: {e}")
 
         return all_chunks, total_pages
 
@@ -104,7 +191,7 @@ class DocumentIngestionService:
         """
         Extract, chunk, embed, and store document in ChromaDB/Vector store and SQLite.
         """
-        chunks_data, total_pages = self.extract_text_and_chunks_from_file(filepath, file_type)
+        chunks_data, total_pages = await self.extract_text_and_chunks_from_file(filepath, file_type)
         if not chunks_data:
             chunks_data = [{
                 "page_number": 1,
@@ -170,6 +257,7 @@ class DocumentIngestionService:
 
         await db.commit()
         return len(chunks_data)
+
 
     async def initialize_company_documents(self, db: AsyncSession) -> int:
         """

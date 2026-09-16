@@ -1,12 +1,12 @@
 # 🛡️ SIH26117 — Sovereign On-Premise AI Workbench
 
-> **An air-gapped, sovereign, multi-agent AI engineering workbench designed for mission-critical industrial operations, technical document RAG, isolated sandbox execution, and artifact generation.**
+> **A sovereign, multi-agent AI engineering workbench designed for mission-critical industrial operations, technical document RAG, isolated sandbox execution, 2D spatial CV document processing, and artifact generation with configurable zero-egress controls.**
 
 ---
 
 ## 🏗️ Architecture Overview
 
-The workbench operates as a 3-tier sovereign ecosystem with **zero external network egress**:
+The workbench operates as a sovereign ecosystem with **configurable zero-egress controls**, utilizing a dual-environment Python architecture for main backend gateway operations and computer vision isolation:
 
 ```mermaid
 graph LR
@@ -17,39 +17,50 @@ graph LR
         Resizer[Draggable Split Resizer]
     end
 
-    subgraph Gateway [Backend Server - FastAPI]
+    subgraph Gateway [Main Backend Gateway - .venv Python 3.14]
         FastAPI[FastAPI Gateway :8000]
         ZeroEgress[Zero-Egress Interceptor]
-        Whisper[Local Faster-Whisper Enclave]
+        Ingestion[Ingestion Service]
+        VisionSvc[Vision Service]
+        CVClient[CVClient Subprocess Bridge]
         DB[(SQLite Audit & Session DB)]
     end
 
+    subgraph CVWorker [Isolated CV Engine - .venv-cv Python 3.11]
+        Runner[backend.cv_engine.runner]
+        PaddleOCR[PaddleOCR 2.7.3 Engine]
+        PDFPlumber[pdfplumber Table Extractor]
+    end
+
     subgraph Intelligence [AI Engine - LangGraph]
-        LangGraph[LangGraph State Machine]
         Supervisor[Supervisor Agent]
         RAG[RAG Worker]
         Sandbox[Code / Sandbox Runner]
-        Vision[Vision / OCR Worker]
     end
 
     subgraph Inference [Ollama Enclave - Local or Colab/ngrok]
         LLM[llama3.1:8b / qwen2.5:7b]
         VLM[qwen2-vl:7b-instruct-q4_K_M]
-        Embeddings[bge-m3 / nomic-embed-text]
+        Embeddings[nomic-embed-text:latest]
     end
 
     React <-->|WebSocket & REST| FastAPI
     FastAPI --> ZeroEgress
-    FastAPI --> Whisper
     FastAPI --> DB
-    FastAPI <--> LangGraph
-    LangGraph --> Supervisor
+    FastAPI --> Ingestion
+    FastAPI --> VisionSvc
+    Ingestion --> PyMuPDF[PyMuPDF Fast Path]
+    Ingestion -.->|Scanned / Table PDF| CVClient
+    VisionSvc <-->|Concurrent asyncio.gather| CVClient
+    VisionSvc <-->|Concurrent asyncio.gather| VLM
+    CVClient <-->|Subprocess JSON IPC| Runner
+    Runner --> PaddleOCR
+    Runner --> PDFPlumber
+    FastAPI <--> Supervisor
     Supervisor --> RAG
     Supervisor --> Sandbox
-    Supervisor --> Vision
     RAG --> Embeddings
     Supervisor --> LLM
-    Vision --> VLM
     Inference -.->|Local 11434 or ngrok| FastAPI
 ```
 
@@ -61,159 +72,157 @@ graph LR
 - **Draggable Fluid Split View**: Drag-and-resize between Chat and Artifact panels with snapping and double-click reset.
 - **Compact 56px Icon-Rail (`⌘B` / `Ctrl+B`)**: Reclaims 224px screen real-estate with 1-click navigation icons.
 - **Dual-Pane Code & Terminal Enclave**: Side-by-side syntax-highlighted code editor and live subprocess execution output with status metrics.
-- **2-Column Side-by-Side Diff Inspector**: Visual historical baseline vs. active head comparison.
+- **Isolated Computer Vision Engine**: 2D spatial text bounding boxes `[ymin, xmin, ymax, xmax]` via PaddleOCR and Markdown table extraction via `pdfplumber`.
+- **Hybrid VLM + OCR Spatial Fusion**: Concurrent Qwen2-VL vision analysis + PaddleOCR spatial grounding with IoB/IoU tag enrichment.
 - **Universal Voice / Audio Input**: Real-time microphone capture with live frequency equalizer bars and local air-gapped Whisper transcription.
-- **Sovereign Air-Gap & Zero-Egress**: Cryptographic SHA-256 audit logging and outbound request interception.
+- **Configurable Zero-Egress Controls**: Cryptographic SHA-256 audit logging and outbound request interception.
 
 ---
 
 ## ⚡ Prerequisites
 
-Ensure the following tools are installed on your host machine:
+Ensure the following runtimes and tools are installed on your host machine:
 
-| Tool | Minimum Version | Purpose |
+| Tool | Environment / Version | Purpose |
 |---|---|---|
-| **Python** | `v3.11+` | Backend FastAPI server & LangGraph AI engine |
-| **uv** | `v0.1.0+` *(Recommended)* | High-speed Python package and venv manager |
-| **Node.js** | `v18.0.0+` (`npm`) | Frontend React + Vite Darkroom Studio |
-| **Ollama** | `v0.3.0+` | Local inference engine for open-weights models |
+| **Python 3.14** | Main `.venv` | FastAPI Gateway, Ingestion Service, Vision Service, SQLite & ChromaDB |
+| **Python 3.11** | Isolated `.venv-cv` | PaddleOCR, `paddlepaddle`, `pdfplumber`, `opencv-python-headless` |
+| **Node.js** | `v18.0.0+` (`npm`) | Frontend React 19 + Vite Darkroom Studio |
+| **Ollama** | `v0.3.0+` | Local inference engine for LLM (`llama3.1:8b`), VLM (`qwen2-vl`), and embeddings |
+
+---
+
+## 👁️ Computer Vision Pipeline & Dual-Environment Setup
+
+### Why the CV Environment is Isolated
+Computer Vision dependencies (`paddlepaddle>=2.6.0,<3.0.0`, `paddleocr==2.7.3`, `numpy<2.0.0`) require Python 3.11 C-extension binary compatibility and specific library versions. To prevent C-extension DLL conflicts and dependency pollution in the main Python 3.14 backend, the CV engine runs strictly inside its own `.venv-cv` virtual environment.
+
+### 1. CV Environment Installation
+Create `.venv-cv` and install the dedicated CV requirements:
+
+```bash
+# 1. Create Python 3.11 virtual environment in project root
+python3.11 -m venv .venv-cv
+
+# 2. Activate environment
+# On Windows:
+.venv-cv\Scripts\activate
+# On Linux/macOS:
+source .venv-cv/bin/activate
+
+# 3. Install CV dependencies
+pip install -r backend/cv_engine/requirements.txt
+```
+
+### 2. CV Dependencies (`backend/cv_engine/requirements.txt`)
+The CV environment contains pinned dependencies for OCR and table extraction:
+- `paddlepaddle>=2.6.0,<3.0.0`
+- `paddleocr==2.7.3`
+- `opencv-python-headless>=4.8.0`
+- `pdfplumber>=0.10.0`
+- `pillow>=10.0.0`
+- `numpy>=1.24.0,<2.0.0`
+
+### 3. Local Model Weights & Directory Setup
+PaddleOCR model directory can be specified via the `--model-dir` flag when running `backend.cv_engine.runner`:
+- **Detection Model**: `ch_PP-OCRv4_det`
+- **Recognition Model**: `ch_PP-OCRv4_rec`
+- **Classification Model**: `ch_ppocr_mobile_v2.0_cls`
+
+*Note: For strict air-gapped deployments, pre-download and place model weights in the directory specified by `--model-dir`. First-run automatic PaddleOCR model weight downloading is provided as a setup/development convenience when network access is available.*
+
+### 4. On-Demand Worker Architecture
+The CV worker is launched **on-demand** by `CVClient` for specific requests and does **not** require a separate persistent daemon or long-running background service. The main Python 3.14 backend invokes the worker as a subprocess:
+```powershell
+.venv-cv\Scripts\python.exe -m backend.cv_engine.runner --input <file_path> --output <temp_json_path>
+```
+`CVClient` automatically manages process execution, sets `cwd` to the repository root, parses the output JSON contract, and deletes transient JSON files in a `finally` block upon completion.
+ block upon completion.
+
+---
+
+## 🔄 Document Ingestion & Vision Pipeline Routing
+
+### 1. Document Ingestion Pipeline (`ingestion_service.py`)
+- **Normal Text PDFs**: PyMuPDF (`fitz`) fast-path extracts page text directly without invoking `.venv-cv`.
+- **Scanned PDFs & Images**: Evaluated using a deterministic trigger condition:
+  $$\text{Trigger CVClient} \iff (\text{clean\_ext} \in \text{images}) \lor (\text{total\_chars} < 50) \lor (\text{avg\_chars\_per\_page} < 20) \lor (\text{has\_tables} = \text{True})$$
+- **Chunking & Indexing**: PaddleOCR text blocks and `pdfplumber` Markdown tables enter the standard `chunk_text()` pipeline. Chunks are embedded via `ollama_client` and persisted into SQLite (`DocumentChunk`) and ChromaDB vector store.
+- **Fallback**: If CV processing fails or times out, image ingestion returns an empty text fallback (`[], 1`), and PDF ingestion falls back to PyMuPDF native text chunks.
+
+### 2. Vision Service Pipeline (`vision_service.py`)
+- **Concurrent Execution**: `POST /api/v1/vision/analyze` executes Qwen2-VL VLM inference and `CVClient` PaddleOCR concurrently via `asyncio.gather(..., return_exceptions=True)`.
+- **Deterministic Spatial Fusion**:
+  - Calculates Intersection-over-BBox ($\text{IoB}_{\text{ocr}}$) and Intersection-over-Union ($\text{IoU}$).
+  - For each OCR Equipment Tag, selects **exactly one** best VLM candidate matching $\text{IoB} \ge 0.50$ or $\text{IoU} \ge 0.20$.
+  - Enriches the VLM element's `tag_code` with the OCR tag text without altering the VLM bounding box.
+  - Retains both VLM elements and OCR elements in the final response.
+- **Fallback Harness**:
+  - If `CVClient` fails: returns Qwen2-VL detections.
+  - If Qwen2-VL is offline/fails: returns `CVClient` PaddleOCR detections.
+  - If both fail: returns deterministic domain sample P&ID elements (`Control Valve CV-401`, `Pressure Indicator PI-105`, `Centrifugal Feed Pump P-201A`).
 
 ---
 
 ## 📦 Model Setup & Download
 
-You can run the inference models in either of two modes: **Local On-Premise GPU/CPU** or **Remote Google Colab GPU (via ngrok)**.
+You can run inference models in **Local On-Premise GPU/CPU** or **Remote Google Colab GPU (via ngrok)** mode.
 
 ---
 
-### Option A: Local On-Premise Ollama (Recommended for GPU Workstations)
+### Option A: Local On-Premise Ollama (Recommended)
 
 1. **Install Ollama**:
-   - **Linux**:
-     ```bash
-     curl -fsSL https://ollama.com/install.sh | sh
-     ```
-   - **macOS / Windows**: Download from [ollama.com/download](https://ollama.com/download).
+   - **Linux**: `curl -fsSL https://ollama.com/install.sh | sh`
+   - **Windows / macOS**: Download from [ollama.com/download](https://ollama.com/download).
 
 2. **Start the Ollama daemon**:
    ```bash
    ollama serve
    ```
 
-3. **Pull required models in a new terminal**:
+3. **Pull required models**:
    ```bash
-   # 1. Core Reasoning & Supervisor Model (~4.7 GB)
+   # 1. Reasoning & Supervisor Model
    ollama pull llama3.1:8b
 
-   # 2. Multimodal Vision & Diagram OCR Model (~4.5 GB)
+   # 2. Multimodal Vision Model
    ollama pull qwen2-vl:7b-instruct-q4_K_M
 
-   # 3. Dense Semantic Embeddings for RAG (~1.2 GB)
-   ollama pull bge-m3
-   ```
-
-   *(Alternative lighter models for low VRAM systems: `qwen2.5:7b-instruct-q4_K_M` and `nomic-embed-text:latest`)*
-
-4. **Verify loaded models**:
-   ```bash
-   ollama list
+   # 3. Dense Semantic Embeddings
+   ollama pull nomic-embed-text:latest
    ```
 
 ---
 
 ### Option B: Remote Google Colab GPU + ngrok Tunneling
 
-If your local machine does not have a dedicated GPU, you can run Ollama on a free Google Colab **T4 GPU** or **A100 GPU** and tunnel the inference endpoint back to your workbench via ngrok.
-
-#### 1. Open Google Colab & Select GPU:
-- Go to [colab.research.google.com](https://colab.research.google.com).
-- Click **Runtime** > **Change runtime type** > Select **T4 GPU** (or **A100 GPU**) > **Save**.
-
-#### 2. Run this setup script in a Colab code cell:
-
-```python
-# ==============================================================================
-# 🚀 GOOGLE COLAB OLLAMA + NGROK INFERENCE HOST
-# ==============================================================================
-
-# 1. Install Ollama and pyngrok
-!curl -fsSL https://ollama.com/install.sh | sh
-!pip install pyngrok
-
-import os
-import subprocess
-import time
-from pyngrok import ngrok
-
-# 2. Enter your free ngrok Authtoken (from https://dashboard.ngrok.com/get-started/your-authtoken)
-NGROK_AUTH_TOKEN = "YOUR_NGROK_AUTH_TOKEN_HERE"  # <-- Replace with your token
-ngrok.set_auth_token(NGROK_AUTH_TOKEN)
-
-# 3. Start Ollama daemon in background
-print("Starting Ollama background server...")
-subprocess.Popen(["ollama", "serve"])
-time.sleep(4)
-
-# 4. Pull required models onto the Colab GPU
-print("Pulling models into GPU VRAM...")
-!ollama pull llama3.1:8b
-!ollama pull qwen2-vl:7b-instruct-q4_K_M
-!ollama pull bge-m3
-
-# 5. Open public ngrok tunnel to Ollama port 11434
-public_tunnel = ngrok.connect(11434, "http")
-print("\n" + "="*70)
-print(f"✅ OLLAMA INFERENCE TUNNEL ACTIVE!")
-print(f"👉 Copy this URL into your workbench .env file:")
-print(f"OLLAMA_BASE_URL={public_tunnel.public_url}")
-print("="*70)
-```
-
-#### 3. Copy the ngrok URL into your `.env`:
-Set `OLLAMA_BASE_URL=https://your-unique-subdomain.ngrok-free.app` in your `.env` file.
+For systems without dedicated local GPUs, run Ollama on Google Colab (T4 / A100 GPU) and tunnel to port 11434 via ngrok. Set `OLLAMA_BASE_URL=https://your-ngrok-subdomain.ngrok-free.app` in your `.env`.
 
 ---
 
 ## ⚙️ Environment Configuration (`.env`)
 
-Create your `.env` file in the project root by copying `.env.example`:
-
-```bash
-cp .env.example .env
-```
-
-### Complete `.env` Reference:
+Copy `.env.example` to `.env`:
 
 ```ini
-# ==============================================================================
-# 1. INFERENCE ENDPOINT
-# ==============================================================================
-# Local Ollama:
+# Inference Endpoint
 OLLAMA_BASE_URL=http://localhost:11434
 
-# OR Remote Colab ngrok tunnel:
-# OLLAMA_BASE_URL=https://your-ngrok-subdomain.ngrok-free.app
-
-# ==============================================================================
-# 2. MODEL OVERRIDES
-# ==============================================================================
+# Model Configurations
 REASONING_MODEL=llama3.1:8b
 VISION_MODEL=qwen2-vl:7b-instruct-q4_K_M
-EMBEDDING_MODEL=bge-m3
-EMBEDDING_DIMENSIONS=1024
+EMBEDDING_MODEL=nomic-embed-text:latest
+EMBEDDING_DIMENSIONS=768
 
-# ==============================================================================
-# 3. FASTAPI GATEWAY SETTINGS
-# ==============================================================================
+# FastAPI Gateway Settings
 HOST=0.0.0.0
 PORT=8000
 DEBUG=True
 API_V1_PREFIX=/api/v1
 PROJECT_NAME="SIH PS26117 Sovereign Agentic Workbench Gateway"
 
-# ==============================================================================
-# 4. AIR-GAP & SANDBOX CONTROLS
-# ==============================================================================
+# Air-Gap & Security
 ENFORCE_ZERO_EGRESS=True
 SANDBOX_TIMEOUT_SECONDS=10
 SANDBOX_MEMORY_LIMIT_MB=512
@@ -223,7 +232,7 @@ SANDBOX_MEMORY_LIMIT_MB=512
 
 ## ⚡ Quick Start (Single Command)
 
-To launch both **Backend Gateway** and **Frontend UI** concurrently in one terminal:
+Launch both **Backend Gateway** and **Frontend UI** concurrently:
 
 ```bash
 python start_all.py
@@ -234,79 +243,61 @@ python start_all.py
 
 ## 🚀 Step-by-Step Execution Guide
 
-### Step 1: Install Backend Dependencies & Start Gateway
+### Step 1: Main Backend Setup (.venv)
 
-1. Open a terminal and navigate to the project root directory:
+1. Navigate to project root:
    ```bash
    cd SIH_26_WORKBENCH_AI
    ```
 
-2. Create virtual environment and install dependencies:
-   - **Using `uv` (Recommended)**:
-     ```bash
-     uv venv
-     source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-     uv pip install -r requirements.txt
-     ```
-   - **Using standard `pip`**:
-     ```bash
-     python -m venv .venv
-     source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-     pip install -r requirements.txt
-     ```
-
-3. Start the FastAPI server using `uv` (or `python -m uvicorn`):
+2. Create main Python 3.14 environment and install dependencies:
    ```bash
-   uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+   python -m venv .venv
+   # Windows: .venv\Scripts\activate | Linux: source .venv/bin/activate
+   pip install -r requirements.txt
    ```
 
-   The backend will initialize the SQLite enclave database and expose:
+3. Start FastAPI server:
+   ```bash
+   uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+   ```
+
+   Gateway Endpoints:
    - **REST Gateway**: `http://localhost:8000`
    - **Interactive Swagger API Docs**: `http://localhost:8000/docs`
    - **Real-time Agent WebSocket**: `ws://localhost:8000/api/v1/agents/ws/{session_id}`
-   - **Audio Whisper Transcribe Endpoint**: `http://localhost:8000/api/v1/audio/transcribe`
+   - **Schematic Vision Analysis**: `http://localhost:8000/api/v1/vision/analyze`
 
 ---
 
-### Step 2: Install Frontend Dependencies & Start UI
+### Step 2: Frontend Setup
 
-1. Open a second terminal and navigate to the `frontend/` directory:
+1. Navigate to `frontend/`:
    ```bash
-   cd SIH_26_WORKBENCH_AI/frontend
-   ```
-
-2. Install dependencies:
-   ```bash
+   cd frontend
    npm install
-   ```
-
-3. Start the Vite development server:
-   ```bash
    npm run dev
    ```
 
-4. Open your browser:
-   ```
-   http://localhost:5173
-   ```
+2. Open browser at `http://localhost:5173`.
 
 ---
 
 ## 🧪 Testing & Verification Suite
 
-### 1. Verify Backend Health & Model Connectivity
-```bash
-curl -s http://localhost:8000/api/v1/system/health | jq
+### 1. Test Isolated CV Runner CLI
+```powershell
+.venv-cv\Scripts\python.exe -m backend.cv_engine.runner --help
 ```
 
-### 2. Run Automated API & Sandbox Tests
+### 2. Verify Backend Health & Model Connectivity
 ```bash
-uv run --with pytest --with pytest-asyncio --with httpx pytest backend/tests/
+curl -s http://localhost:8000/api/v1/system/health
 ```
 
-### 3. Check Python Syntax Across All Modules
+### 3. Run Automated Pytest Suite
 ```bash
-uv run python -m py_compile backend/app/main.py backend/app/services/agent_engine.py backend/app/api/v1/endpoints/audio.py
+pytest backend/tests/
 ```
 
 ### 4. Build Frontend Production Bundle
@@ -322,32 +313,32 @@ npm --prefix frontend run build
 SIH_26_WORKBENCH_AI/
 ├── ai_engine/                   # LangGraph multi-agent orchestration
 │   ├── agents/                  # Supervisor, RAG, Code, Vision agent nodes
-│   ├── prompts/                 # Industrial SOP prompts & compliance grounding
 │   ├── tools/                   # Sandbox runner, doc generator, vector search
-│   ├── graph.py                 # Compiled LangGraph workflow state machine
-│   └── state.py                 # TypedDict agent state definitions
+│   └── graph.py                 # LangGraph state machine definition
 │
 ├── backend/                     # FastAPI Sovereign Gateway
 │   ├── app/
-│   │   ├── api/v1/endpoints/    # REST routes (audio, sandbox, documents, ws)
+│   │   ├── api/v1/endpoints/    # REST routes (audio, sandbox, documents, vision, ws)
 │   │   ├── core/                # Zero-egress interceptor & security audit
-│   │   ├── models/              # SQLAlchemy & Pydantic schemas
-│   │   ├── services/            # Ollama client, Whisper transcription, sandbox
+│   │   ├── models/              # SQLAlchemy & Pydantic schemas (CVRunnerResponse, DetectedElement)
+│   │   ├── services/            # CVClient bridge, ingestion, vision, ollama, vector store
 │   │   └── main.py              # Application lifecycle entry point
-│   ├── storage/                 # Local uploads, artifacts, and SQLite database
+│   ├── cv_engine/               # Isolated CV Engine (.venv-cv, Python 3.11)
+│   │   ├── ocr_processor.py     # PaddleOCR 2D spatial bounding box wrapper
+│   │   ├── table_extractor.py   # pdfplumber table extraction
+│   │   ├── runner.py            # CLI entrypoint & JSON IPC output generator
+│   │   └── requirements.txt     # Isolated CV environment dependencies
+│   ├── storage/                 # Uploads, artifacts, temp dir, SQLite DB
 │   └── tests/                   # Pytest automated test suites
 │
 ├── frontend/                    # React 19 + Vite Darkroom Studio
 │   ├── src/
-│   │   ├── components/
-│   │   │   ├── artifact/        # Split-View Artifact Studio & Dual-Pane Terminal
-│   │   │   ├── chat/            # InputBar with universal voice input, MessageBlock
-│   │   │   └── layout/          # 56px Icon-Rail Sidebar, CommandPalette (⌘K)
-│   │   ├── routes/              # ChatPage (Draggable Split), Chats, Projects, Library
-│   │   └── lib/                 # API client, WebSocket manager, WorkbenchContext
+│   │   ├── components/          # Split-View Artifact Studio & Dual-Pane Terminal
+│   │   ├── routes/              # ChatPage, Chats, Projects, Library
+│   │   └── lib/                 # API client & WebSocket manager
 │   └── vite.config.ts           # Proxy configuration for backend API & WS
 │
-├── .env.example                 # Environment configuration template
+├── start_all.py                 # Unified launcher for frontend & backend
 └── README.md                    # System documentation & setup manual
 ```
 
@@ -355,15 +346,7 @@ SIH_26_WORKBENCH_AI/
 
 ## 🔒 Security & Air-Gap Compliance
 
-- **Zero-Egress Interception**: The backend middleware blocks any outgoing network requests outside localhost / local enclave IP ranges.
-- **Cryptographic Audit Log**: Every user query, tool invocation, and generated output is cryptographically hashed (`SHA-256`) and stored in SQLite for industrial compliance.
-- **Subprocess Isolation**: Code execution runs in an isolated sandbox with strict CPU, memory, and timeout constraints.
-- **Air-Gapped Whisper**: Audio transcription runs entirely on-premise without external cloud APIs.
-
----
-
-## 📖 Deep Dive Documentation
-
-- **[System Status & Integration Roadmap](file:///home/maaz/Personal/SIH_26_WORKBENCH_AI/backend/docs/SYSTEM_STATUS_AND_INTEGRATION_ROADMAP.md)** (`backend/docs/SYSTEM_STATUS_AND_INTEGRATION_ROADMAP.md`)
-- **[Frontend Darkroom Design System](file:///home/maaz/Personal/SIH_26_WORKBENCH_AI/frontend/DESIGN.md)** (`frontend/DESIGN.md`)
-- **[SIH Problem Statement Specification](file:///home/maaz/Personal/SIH_26_WORKBENCH_AI/backend/docs/SIH26117.md)** (`backend/docs/SIH26117.md`)
+- **On-Premise Local Processing**: All document parsing (PyMuPDF), OCR (PaddleOCR), table extraction (`pdfplumber`), embeddings (ChromaDB), and speech transcription (Whisper) execute strictly on-premise.
+- **Zero-Egress Interception**: FastAPI middleware intercepts network calls, enforcing zero outbound egress to external cloud APIs when `ENFORCE_ZERO_EGRESS=True`.
+- **Cryptographic Audit Log**: Every user prompt, tool execution, and document chunk citation is SHA-256 hashed and logged in SQLite.
+- **Isolated Process Execution**: Code execution runs in isolated sandbox processes with strict CPU, memory, and timeout bounds.

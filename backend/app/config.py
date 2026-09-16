@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     ARTIFACTS_DIR: str = str(BACKEND_DIR / "storage" / "artifacts")
     CHROMA_PERSIST_DIR: str = str(BACKEND_DIR / "storage" / "chroma_db")
     SQLITE_DB_PATH: str = str(BACKEND_DIR / "storage" / "workbench.db")
+    TEMP_DIR: str = str(BACKEND_DIR / "storage" / "temp")
+
+    # Isolated CV Virtual Environment Executable
+    VENV_CV_PYTHON: str = str(
+        ROOT_DIR / ".venv-cv" / ("Scripts" if os.name == "nt" else "bin") / ("python.exe" if os.name == "nt" else "python")
+    )
 
     # Local LLM / VLM / Embedding Models
     OLLAMA_BASE_URL: str = "http://localhost:11434"
@@ -50,8 +56,10 @@ class Settings(BaseSettings):
             self.UPLOADS_DIR,
             self.ARTIFACTS_DIR,
             self.CHROMA_PERSIST_DIR,
+            self.TEMP_DIR,
         ]:
             os.makedirs(path, exist_ok=True)
+
 
 
 settings = Settings()

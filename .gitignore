@@ -36,3 +36,7 @@ backend/storage/artifacts/*
 !backend/storage/artifacts/.gitkeep
 backend/storage/chroma_db/
 
+
+# CV pipeline runtime artifacts
+backend/env
+backend/storage/temp/

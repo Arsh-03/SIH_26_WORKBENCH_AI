@@ -268,3 +268,28 @@ class SessionBundleResponse(BaseModel):
     download_url: str
     file_path: str
 
+
+# Computer Vision Worker Models (Phase 1A / Phase 1B Contract)
+class CVTextBlock(BaseModel):
+    block_id: str
+    text: str
+    confidence: float
+    bounding_box_2d: List[int]  # [ymin, xmin, ymax, xmax]
+
+
+class CVPageResult(BaseModel):
+    page_number: int
+    width: int
+    height: int
+    text_blocks: List[CVTextBlock] = Field(default_factory=list)
+    tables: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class CVRunnerResponse(BaseModel):
+    status: str  # "success" | "error"
+    processing_time_ms: int
+    total_pages: int
+    pages: List[CVPageResult] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+
+
