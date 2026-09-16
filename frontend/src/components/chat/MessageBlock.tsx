@@ -13,6 +13,7 @@ import { InteractiveEconomicsCard, type EconomicsSpec } from './InteractiveEcono
 import { InteractivePhysicsCard, type PhysicsSpec } from './InteractivePhysicsCard'
 import { InteractivePidCanvas, type PidSpec } from './InteractivePidCanvas'
 import { api } from '../../lib/api'
+import { useAudioPlayback } from '../../lib/AudioPlaybackContext'
 
 export interface MessageBlockProps {
   message: ChatMessage
@@ -573,6 +574,7 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
   const [editText, setEditText] = React.useState(message.text)
   const [isPromptCopied, setIsPromptCopied] = React.useState(false)
   const [isAiCopied, setIsAiCopied] = React.useState(false)
+  const { activeText, isPlaying, playText } = useAudioPlayback()
 
   const isUser = message.sender === 'user'
 
@@ -1141,6 +1143,20 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
 
       {/* Response Bottom Action Bar (Icon-only copy button) */}
       <div className="flex items-center gap-2 pt-1">
+        <button
+          type="button"
+          onClick={() => playText(cleanText)}
+          title={activeText === cleanText && isPlaying ? 'Pause response audio' : 'Listen to response'}
+          aria-label={activeText === cleanText && isPlaying ? 'Pause response audio' : 'Listen to response'}
+          className={`flex items-center justify-center p-1.5 rounded-[4px] transition-all cursor-pointer ${activeText === cleanText && isPlaying
+            ? 'text-accent-primary bg-accent-primary/15 border border-accent-primary/40'
+            : 'text-text-muted hover:text-text-primary hover:bg-surface-2 border border-transparent hover:border-border/60'
+            }`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {activeText === cleanText && isPlaying ? <><rect x="6" y="5" width="4" height="14" /><rect x="14" y="5" width="4" height="14" /></> : <><path d="M11 5 6 9H2v6h4l5 4z" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" /></>}
+          </svg>
+        </button>
         <button
           type="button"
           onClick={handleCopyAiContent}

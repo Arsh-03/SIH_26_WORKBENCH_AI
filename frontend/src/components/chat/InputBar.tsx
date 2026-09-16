@@ -1,35 +1,52 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { useWorkbench } from '../../lib/WorkbenchContext'
-import { api } from '../../lib/api'
+import React, { useState, useRef, useEffect, useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useWorkbench } from "../../lib/WorkbenchContext";
+import { api } from "../../lib/api";
+import { useAudioPlayback } from "../../lib/AudioPlaybackContext";
 
 export interface InputBarProps {
-  onSendMessage?: (text: string) => void
-  isStreaming?: boolean
-  onStopStreaming?: () => void
-  className?: string
-  placeholder?: string
+  onSendMessage?: (text: string) => void;
+  isStreaming?: boolean;
+  onStopStreaming?: () => void;
+  className?: string;
+  placeholder?: string;
 }
 
 interface SlashCommand {
-  command: string
-  label: string
-  description: string
+  command: string;
+  label: string;
+  description: string;
 }
 
 const SLASH_COMMANDS: SlashCommand[] = [
-  { command: '/explain', label: 'Explain Code', description: 'Break down architecture and logic' },
-  { command: '/refactor', label: 'Refactor Module', description: 'Decouple rendering, improve performance' },
-  { command: '/test', label: 'Generate Tests', description: 'Unit & integration test coverage' },
-  { command: '/fix', label: 'Fix Bug', description: 'Diagnose and repair exception traces' },
-]
+  {
+    command: "/explain",
+    label: "Explain Code",
+    description: "Break down architecture and logic",
+  },
+  {
+    command: "/refactor",
+    label: "Refactor Module",
+    description: "Decouple rendering, improve performance",
+  },
+  {
+    command: "/test",
+    label: "Generate Tests",
+    description: "Unit & integration test coverage",
+  },
+  {
+    command: "/fix",
+    label: "Fix Bug",
+    description: "Diagnose and repair exception traces",
+  },
+];
 
 export const InputBar: React.FC<InputBarProps> = ({
   onSendMessage,
   isStreaming: propIsStreaming,
   onStopStreaming: propOnStopStreaming,
-  className = '',
-  placeholder = 'Ask a question, propose an edit, or type / for commands…',
+  className = "",
+  placeholder = "Ask a question, propose an edit, or type / for commands…",
 }) => {
   const {
     scopeFiles,
@@ -41,420 +58,452 @@ export const InputBar: React.FC<InputBarProps> = ({
     isStreaming: ctxIsStreaming,
     stopStreaming: ctxStopStreaming,
     sendMessage: ctxSendMessage,
-  } = useWorkbench()
+  } = useWorkbench();
 
-  const isStreaming = propIsStreaming ?? ctxIsStreaming
-  const onStopStreaming = propOnStopStreaming ?? ctxStopStreaming
+  const isStreaming = propIsStreaming ?? ctxIsStreaming;
+  const onStopStreaming = propOnStopStreaming ?? ctxStopStreaming;
+  const { voiceMode, setVoiceMode } = useAudioPlayback();
 
-  const [inputText, setInputText] = useState('')
-  const [isAttachmentOpen, setIsAttachmentOpen] = useState(false)
-  const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false)
-  const [slashQuery, setSlashQuery] = useState('')
-  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
-  const [isAtMenuOpen, setIsAtMenuOpen] = useState(false)
-  const [atQuery, setAtQuery] = useState('')
-  const [isDragOver, setIsDragOver] = useState(false)
-  const [isSendFlashing, setIsSendFlashing] = useState(false)
-
+  const [inputText, setInputText] = useState("");
+  const [isAttachmentOpen, setIsAttachmentOpen] = useState(false);
+  const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  const [isAtMenuOpen, setIsAtMenuOpen] = useState(false);
+  const [atQuery, setAtQuery] = useState("");
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [isSendFlashing, setIsSendFlashing] = useState(false);
 
   // Voice Input (Speech-to-Text & Audio Visualizer) State
-  const [isListening, setIsListening] = useState(false)
-  const [isTranscribing, setIsTranscribing] = useState(false)
-  const [speechError, setSpeechError] = useState<string | null>(null)
-  const [audioLevel, setAudioLevel] = useState(0)
+  const [isListening, setIsListening] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [speechError, setSpeechError] = useState<string | null>(null);
+  const [audioLevel, setAudioLevel] = useState(0);
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const popoverRef = useRef<HTMLDivElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const recognitionRef = useRef<any>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const analyserRef = useRef<AnalyserNode | null>(null)
-  const mediaStreamRef = useRef<MediaStream | null>(null)
-  const animationFrameRef = useRef<number | null>(null)
-  const baseTextRef = useRef<string>('')
-  const hasLiveTranscriptRef = useRef<boolean>(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const baseTextRef = useRef<string>("");
+  const hasLiveTranscriptRef = useRef<boolean>(false);
 
   // Clean up audio & recognition on unmount
   useEffect(() => {
     return () => {
-      stopVoiceInput()
-    }
-  }, [])
+      stopVoiceInput();
+    };
+  }, []);
 
-  const stopVoiceInput = () => {
+  const stopVoiceInput = (submitAfter = false) => {
     if (recognitionRef.current) {
       try {
-        recognitionRef.current.stop()
+        recognitionRef.current.stop();
       } catch (err) {
         // Ignore stop error
       }
-      recognitionRef.current = null
+      recognitionRef.current = null;
     }
 
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !== "inactive"
+    ) {
       try {
-        mediaRecorderRef.current.stop()
+        mediaRecorderRef.current.stop();
       } catch (err) {
         // Ignore stop error
       }
     }
 
     if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current)
-      animationFrameRef.current = null
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
     }
 
     if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((track) => track.stop())
-      mediaStreamRef.current = null
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
     }
 
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(() => {})
-      audioContextRef.current = null
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
     }
 
-    setIsListening(false)
-    setAudioLevel(0)
-  }
+    setIsListening(false);
+    setAudioLevel(0);
+    if (submitAfter) {
+      window.setTimeout(() => handleSubmit(), 120);
+    }
+  };
 
   const startVoiceInput = async () => {
-    setSpeechError(null)
-    hasLiveTranscriptRef.current = false
-    audioChunksRef.current = []
+    setSpeechError(null);
+    hasLiveTranscriptRef.current = false;
+    audioChunksRef.current = [];
 
     try {
       // 1. Request microphone access for real-time audio analysis & recording
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      mediaStreamRef.current = stream
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
 
       // 2. Set up Web Audio API equalizer visualizer
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
-      audioContextRef.current = audioCtx
-      const analyser = audioCtx.createAnalyser()
-      analyser.fftSize = 64
-      analyserRef.current = analyser
+      const audioCtx = new (
+        window.AudioContext || (window as any).webkitAudioContext
+      )();
+      audioContextRef.current = audioCtx;
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      analyserRef.current = analyser;
 
-      const source = audioCtx.createMediaStreamSource(stream)
-      source.connect(analyser)
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
 
-      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
       const updateLevel = () => {
-        if (!analyserRef.current) return
-        analyserRef.current.getByteFrequencyData(dataArray)
-        let sum = 0
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
         for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i]
+          sum += dataArray[i];
         }
-        const average = sum / dataArray.length
-        setAudioLevel(Math.min(1, average / 60))
-        animationFrameRef.current = requestAnimationFrame(updateLevel)
-      }
-      updateLevel()
+        const average = sum / dataArray.length;
+        setAudioLevel(Math.min(1, average / 60));
+        animationFrameRef.current = requestAnimationFrame(updateLevel);
+      };
+      updateLevel();
 
       // 3. Set up MediaRecorder for universal browser support (Firefox, Safari, Chrome, Edge)
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : MediaRecorder.isTypeSupported('audio/ogg')
-        ? 'audio/ogg'
-        : ''
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : MediaRecorder.isTypeSupported("audio/ogg")
+            ? "audio/ogg"
+            : "";
 
-      const options = mimeType ? { mimeType } : undefined
-      const mediaRecorder = new MediaRecorder(stream, options)
-      mediaRecorderRef.current = mediaRecorder
+      const options = mimeType ? { mimeType } : undefined;
+      const mediaRecorder = new MediaRecorder(stream, options);
+      mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
-          audioChunksRef.current.push(e.data)
+          audioChunksRef.current.push(e.data);
         }
-      }
+      };
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/webm' })
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: mimeType || "audio/webm",
+        });
         // If Web Speech API was not available or produced no transcript, transcribe via Whisper backend
         if (!hasLiveTranscriptRef.current && audioBlob.size > 1000) {
-          setIsTranscribing(true)
+          setIsTranscribing(true);
           try {
-            const res = await api.transcribeAudio(audioBlob, `speech_${Date.now()}.webm`)
+            const res = await api.transcribeAudio(
+              audioBlob,
+              `speech_${Date.now()}.webm`,
+            );
             if (res.text && res.text.trim()) {
               setInputText((prev) => {
-                const base = prev ? (prev.endsWith(' ') ? prev : `${prev} `) : ''
-                return `${base}${res.text.trim()}`
-              })
+                const base = prev
+                  ? prev.endsWith(" ")
+                    ? prev
+                    : `${prev} `
+                  : "";
+                return `${base}${res.text.trim()}`;
+              });
+              if (voiceMode) window.setTimeout(() => handleSubmit(), 120);
             }
           } catch (err: any) {
-            console.error('Backend transcription failed:', err)
-            setSpeechError(err.message || 'Failed to transcribe audio.')
+            console.error("Backend transcription failed:", err);
+            setSpeechError(err.message || "Failed to transcribe audio.");
           } finally {
-            setIsTranscribing(false)
+            setIsTranscribing(false);
           }
+        } else if (voiceMode && hasLiveTranscriptRef.current) {
+          window.setTimeout(() => handleSubmit(), 120);
         }
-      }
+      };
 
-      mediaRecorder.start(250) // Collect 250ms chunks
-      setIsListening(true)
+      mediaRecorder.start(250); // Collect 250ms chunks
+      setIsListening(true);
 
       // 4. Also try browser SpeechRecognition if available for instantaneous real-time typing
       const SpeechRecognition =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition;
 
       if (SpeechRecognition) {
         try {
-          const recognition = new SpeechRecognition()
-          recognition.continuous = true
-          recognition.interimResults = true
-          recognition.lang = 'en-US'
+          const recognition = new SpeechRecognition();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.lang = "en-US";
 
-          baseTextRef.current = inputText ? (inputText.endsWith(' ') ? inputText : `${inputText} `) : ''
+          baseTextRef.current = inputText
+            ? inputText.endsWith(" ")
+              ? inputText
+              : `${inputText} `
+            : "";
 
           recognition.onresult = (event: any) => {
-            let interimTranscript = ''
-            let finalTranscript = ''
+            let interimTranscript = "";
+            let finalTranscript = "";
 
             for (let i = event.resultIndex; i < event.results.length; ++i) {
               if (event.results[i].isFinal) {
-                finalTranscript += event.results[i][0].transcript
+                finalTranscript += event.results[i][0].transcript;
               } else {
-                interimTranscript += event.results[i][0].transcript
+                interimTranscript += event.results[i][0].transcript;
               }
             }
 
-            const fullSpoken = (finalTranscript || interimTranscript).trim()
+            const fullSpoken = (finalTranscript || interimTranscript).trim();
             if (fullSpoken) {
-              hasLiveTranscriptRef.current = true
-              setInputText(`${baseTextRef.current}${fullSpoken}`)
+              hasLiveTranscriptRef.current = true;
+              setInputText(`${baseTextRef.current}${fullSpoken}`);
             }
-          }
+          };
 
           recognition.onerror = (event: any) => {
-            if (event.error !== 'no-speech') {
-              console.warn('Speech recognition warning:', event.error)
+            if (event.error !== "no-speech") {
+              console.warn("Speech recognition warning:", event.error);
             }
-          }
+          };
 
-          recognitionRef.current = recognition
-          recognition.start()
+          recognitionRef.current = recognition;
+          recognition.start();
         } catch (e) {
           // Gracefully fall back to backend MediaRecorder transcription
-          console.warn('Native speech recognition skipped, using backend Whisper:', e)
+          console.warn(
+            "Native speech recognition skipped, using backend Whisper:",
+            e,
+          );
         }
       }
     } catch (err: any) {
-      console.error('Error starting audio recording:', err)
-      setSpeechError(err.message || 'Microphone access denied or unavailable.')
-      stopVoiceInput()
+      console.error("Error starting audio recording:", err);
+      setSpeechError(err.message || "Microphone access denied or unavailable.");
+      stopVoiceInput();
     }
-  }
+  };
 
   const toggleVoiceInput = () => {
     if (isListening) {
-      stopVoiceInput()
+      stopVoiceInput(voiceMode);
     } else {
-      startVoiceInput()
+      startVoiceInput();
     }
-  }
+  };
 
   // Handle file & photo selection
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files || files.length === 0) return
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     const newScopeFiles = Array.from(files).map((f) => ({
       id: `file-${Date.now()}-${f.name}`,
       name: f.name,
-    }))
+    }));
 
-    setScopeFiles((prev) => [...prev, ...newScopeFiles])
-    setIsAttachmentOpen(false)
+    setScopeFiles((prev) => [...prev, ...newScopeFiles]);
+    setIsAttachmentOpen(false);
 
     // Attempt background document upload to backend
     Array.from(files).forEach((f) => {
-      api.uploadDocument('default_workspace', f).catch((err) => {
-        console.warn('Document upload notice:', err)
-      })
-    })
+      api.uploadDocument("default_workspace", f).catch((err) => {
+        console.warn("Document upload notice:", err);
+      });
+    });
 
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   // Auto-resize textarea height
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
     }
-  }, [inputText])
+  }, [inputText]);
 
   // Filter slash commands based on typed query after '/'
   const filteredSlashCommands = SLASH_COMMANDS.filter((cmd) => {
-    if (!slashQuery) return true
-    const q = slashQuery.toLowerCase()
+    if (!slashQuery) return true;
+    const q = slashQuery.toLowerCase();
     return (
       cmd.command.slice(1).toLowerCase().includes(q) ||
       cmd.label.toLowerCase().includes(q) ||
       cmd.description.toLowerCase().includes(q)
-    )
-  })
+    );
+  });
 
   // Filter @ file mentions (session artifacts + scope files)
   const availableAtFiles = React.useMemo(() => {
-    const list: string[] = scopeFiles.map((s) => s.name)
+    const list: string[] = scopeFiles.map((s) => s.name);
     messages.forEach((m) => {
       if (m.artifact && !list.includes(m.artifact.title)) {
-        list.push(m.artifact.title)
+        list.push(m.artifact.title);
       }
-    })
-    return list.filter((f) => !atQuery || f.toLowerCase().includes(atQuery.toLowerCase()))
-  }, [scopeFiles, messages, atQuery])
+    });
+    return list.filter(
+      (f) => !atQuery || f.toLowerCase().includes(atQuery.toLowerCase()),
+    );
+  }, [scopeFiles, messages, atQuery]);
 
   const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragOver(true)
-  }
+    e.preventDefault();
+    setIsDragOver(true);
+  };
 
   const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragOver(false)
-  }
+    e.preventDefault();
+    setIsDragOver(false);
+  };
 
   const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragOver(false)
+    e.preventDefault();
+    setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const droppedFiles = Array.from(e.dataTransfer.files)
+      const droppedFiles = Array.from(e.dataTransfer.files);
       const newScopes = droppedFiles.map((f) => ({
         id: f.name,
         name: f.name,
-      }))
-      setScopeFiles([...scopeFiles, ...newScopes])
+      }));
+      setScopeFiles([...scopeFiles, ...newScopes]);
       droppedFiles.forEach((f) => {
-        api.uploadDocument('default_workspace', f).catch((err) => {
-          console.warn('Document upload notice:', err)
-        })
-      })
+        api.uploadDocument("default_workspace", f).catch((err) => {
+          console.warn("Document upload notice:", err);
+        });
+      });
     }
-  }
+  };
 
   // Detect slash commands and @ file mentions
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value
-    setInputText(val)
+    const val = e.target.value;
+    setInputText(val);
 
-    if (val.startsWith('/')) {
-      const spaceIdx = val.indexOf(' ')
+    if (val.startsWith("/")) {
+      const spaceIdx = val.indexOf(" ");
       if (spaceIdx === -1) {
-        const query = val.slice(1)
-        setSlashQuery(query)
-        setIsSlashMenuOpen(true)
-        setIsAtMenuOpen(false)
-        setSlashSelectedIndex(0)
-        return
+        const query = val.slice(1);
+        setSlashQuery(query);
+        setIsSlashMenuOpen(true);
+        setIsAtMenuOpen(false);
+        setSlashSelectedIndex(0);
+        return;
       }
     }
 
-    const atIdx = val.lastIndexOf('@')
-    if (atIdx !== -1 && (atIdx === 0 || val[atIdx - 1] === ' ')) {
-      const query = val.slice(atIdx + 1)
-      setAtQuery(query)
-      setIsAtMenuOpen(true)
-      setIsSlashMenuOpen(false)
-      return
+    const atIdx = val.lastIndexOf("@");
+    if (atIdx !== -1 && (atIdx === 0 || val[atIdx - 1] === " ")) {
+      const query = val.slice(atIdx + 1);
+      setAtQuery(query);
+      setIsAtMenuOpen(true);
+      setIsSlashMenuOpen(false);
+      return;
     }
 
-    setIsSlashMenuOpen(false)
-    setIsAtMenuOpen(false)
-  }
+    setIsSlashMenuOpen(false);
+    setIsAtMenuOpen(false);
+  };
 
   // Insert selected @ file mention and focus input
   const handleSelectAtFile = (fileName: string) => {
-    const atIdx = inputText.lastIndexOf('@')
-    const prefix = atIdx !== -1 ? inputText.slice(0, atIdx) : inputText
-    setInputText(`${prefix}@${fileName} `)
-    setIsAtMenuOpen(false)
-    setAtQuery('')
-    textareaRef.current?.focus()
-  }
+    const atIdx = inputText.lastIndexOf("@");
+    const prefix = atIdx !== -1 ? inputText.slice(0, atIdx) : inputText;
+    setInputText(`${prefix}@${fileName} `);
+    setIsAtMenuOpen(false);
+    setAtQuery("");
+    textareaRef.current?.focus();
+  };
 
   // Insert selected slash command and focus input
   const handleSelectSlash = (cmd: SlashCommand) => {
-    setInputText(`${cmd.command} `)
-    setIsSlashMenuOpen(false)
-    setSlashQuery('')
-    textareaRef.current?.focus()
-  }
-
+    setInputText(`${cmd.command} `);
+    setIsSlashMenuOpen(false);
+    setSlashQuery("");
+    textareaRef.current?.focus();
+  };
 
   const handleSubmit = (e?: React.FormEvent) => {
-    if (e) e.preventDefault()
+    if (e) e.preventDefault();
     // If streaming and input is empty, treat as stop generation request
     if (isStreaming && !inputText.trim()) {
-      onStopStreaming?.()
-      return
+      onStopStreaming?.();
+      return;
     }
 
     if (isListening) {
-      stopVoiceInput()
+      stopVoiceInput();
     }
 
-    if (!inputText.trim()) return
+    if (!inputText.trim()) return;
 
     // Trigger amber flash + scale micro-interaction (DESIGN.md Section 6)
-    setIsSendFlashing(true)
-    setTimeout(() => setIsSendFlashing(false), 120)
+    setIsSendFlashing(true);
+    setTimeout(() => setIsSendFlashing(false), 120);
 
-    const textToSend = inputText.trim()
-    setInputText('')
-    setIsSlashMenuOpen(false)
-    setSlashQuery('')
+    const textToSend = inputText.trim();
+    setInputText("");
+    setIsSlashMenuOpen(false);
+    setSlashQuery("");
 
     if (onSendMessage) {
-      onSendMessage(textToSend)
+      onSendMessage(textToSend);
     } else {
-      ctxSendMessage(textToSend)
+      ctxSendMessage(textToSend);
     }
-  }
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Handle slash menu navigation
     if (isSlashMenuOpen && filteredSlashCommands.length > 0) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        setSlashSelectedIndex((prev) => (prev + 1) % filteredSlashCommands.length)
-        return
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault()
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
         setSlashSelectedIndex(
-          (prev) => (prev - 1 + filteredSlashCommands.length) % filteredSlashCommands.length
-        )
-        return
+          (prev) => (prev + 1) % filteredSlashCommands.length,
+        );
+        return;
       }
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault()
-        const selected = filteredSlashCommands[slashSelectedIndex]
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashSelectedIndex(
+          (prev) =>
+            (prev - 1 + filteredSlashCommands.length) %
+            filteredSlashCommands.length,
+        );
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const selected = filteredSlashCommands[slashSelectedIndex];
         if (selected) {
-          handleSelectSlash(selected)
+          handleSelectSlash(selected);
         }
-        return
+        return;
       }
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setIsSlashMenuOpen(false)
-        return
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setIsSlashMenuOpen(false);
+        return;
       }
     }
 
     // Normal Enter to submit
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit()
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
     }
-  }
+  };
 
   // Close attachment popover on click outside
   useEffect(() => {
@@ -463,37 +512,40 @@ export const InputBar: React.FC<InputBarProps> = ({
         popoverRef.current &&
         !popoverRef.current.contains(e.target as Node)
       ) {
-        setIsAttachmentOpen(false)
+        setIsAttachmentOpen(false);
       }
-    }
+    };
 
     if (isAttachmentOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
+      document.addEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
     }
-  }, [isAttachmentOpen])
+  }, [isAttachmentOpen]);
 
   const hasReportInScope = useMemo(() => {
     return scopeFiles.some((f) => {
-      const lower = f.name.toLowerCase()
+      const lower = f.name.toLowerCase();
       return (
-        lower.endsWith('.pdf') ||
-        lower.endsWith('.csv') ||
-        lower.endsWith('.xlsx') ||
-        lower.endsWith('.xls') ||
-        lower.endsWith('.docx') ||
-        lower.endsWith('.doc') ||
-        lower.endsWith('.txt') ||
-        lower.endsWith('.json') ||
-        lower.includes('report') ||
-        lower.includes('log') ||
-        lower.includes('telemetry')
-      )
-    })
-  }, [scopeFiles])
+        lower.endsWith(".pdf") ||
+        lower.endsWith(".csv") ||
+        lower.endsWith(".xlsx") ||
+        lower.endsWith(".xls") ||
+        lower.endsWith(".docx") ||
+        lower.endsWith(".doc") ||
+        lower.endsWith(".txt") ||
+        lower.endsWith(".json") ||
+        lower.includes("report") ||
+        lower.includes("log") ||
+        lower.includes("telemetry")
+      );
+    });
+  }, [scopeFiles]);
 
   return (
-    <div className={`relative w-full max-w-4xl mx-auto select-none ${className}`}>
+    <div
+      className={`relative w-full max-w-4xl mx-auto select-none ${className}`}
+    >
       {/* Context Indicator Strip (DESIGN.md Section 4B): Reflects real open artifact files */}
       <AnimatePresence>
         {scopeFiles.length > 0 && (
@@ -507,7 +559,7 @@ export const InputBar: React.FC<InputBarProps> = ({
                   <motion.div
                     key={file.id}
                     initial={{ opacity: 0, scale: 0.8, width: 0 }}
-                    animate={{ opacity: 1, scale: 1, width: 'auto' }}
+                    animate={{ opacity: 1, scale: 1, width: "auto" }}
                     exit={{
                       opacity: 0,
                       scale: 0.8,
@@ -517,7 +569,7 @@ export const InputBar: React.FC<InputBarProps> = ({
                       marginLeft: 0,
                       marginRight: 0,
                     }}
-                    transition={{ duration: 0.15, ease: 'easeOut' }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
                     className="inline-flex items-center gap-1.5 rounded-[2px] border border-border/80 bg-surface-1 px-2 py-0.5 text-text-body overflow-hidden whitespace-nowrap"
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-accent-primary shrink-0" />
@@ -542,17 +594,19 @@ export const InputBar: React.FC<InputBarProps> = ({
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 onClick={() => {
-                  const docList = scopeFiles.map((f) => f.name).join(', ')
-                  const prompt = `Analyze the uploaded document (${docList}) and generate interactive visual analytics including operational KPIs, unit yield curves, 2D equipment fouling heatmaps, and engineering recommendations.`
-                  setInputText(prompt)
+                  const docList = scopeFiles.map((f) => f.name).join(", ");
+                  const prompt = `Analyze the uploaded document (${docList}) and generate interactive visual analytics including operational KPIs, unit yield curves, 2D equipment fouling heatmaps, and engineering recommendations.`;
+                  setInputText(prompt);
                   if (textareaRef.current) {
-                    textareaRef.current.focus()
+                    textareaRef.current.focus();
                   }
                 }}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[2px] bg-accent-primary/15 text-accent-primary hover:bg-accent-primary hover:text-black border border-accent-primary/60 shadow-xs transition-all cursor-pointer select-none font-mono text-[10px] font-bold shrink-0 ml-auto group"
                 title="Generate Chart.js, Heatmaps, and KPIs from this report"
               >
-                <span className="group-hover:scale-110 transition-transform">📊</span>
+                <span className="group-hover:scale-110 transition-transform">
+                  📊
+                </span>
                 <span>Analyze &amp; Generate Infographics</span>
               </motion.button>
             )}
@@ -568,7 +622,7 @@ export const InputBar: React.FC<InputBarProps> = ({
             initial={{ opacity: 0, y: 8, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
             className="absolute bottom-full left-4 mb-2 w-72 rounded-[4px] border border-border bg-surface-2 p-2 shadow-2xl z-30 space-y-1"
           >
             <div className="px-2.5 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-text-muted border-b border-border/60">
@@ -592,7 +646,6 @@ export const InputBar: React.FC<InputBarProps> = ({
               + Add photos & files
             </button>
 
-
             <div className="pt-1 border-t border-border/40">
               <span className="px-2.5 py-1 block font-mono text-[9px] uppercase tracking-wider text-text-muted">
                 ACTIVE TOOLS
@@ -601,36 +654,42 @@ export const InputBar: React.FC<InputBarProps> = ({
               {/* Tool Toggle: Web Search */}
               <button
                 type="button"
-                onClick={() => toggleTool('webSearch')}
+                onClick={() => toggleTool("webSearch")}
                 className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-text-body hover:text-text-primary rounded-[2px] transition-colors border-l-2 border-transparent hover:border-accent-primary cursor-pointer"
               >
                 <span>Web search</span>
                 {activeTools.webSearch && (
-                  <span className="font-mono text-xs text-accent-primary font-bold">✓</span>
+                  <span className="font-mono text-xs text-accent-primary font-bold">
+                    ✓
+                  </span>
                 )}
               </button>
 
               {/* Tool Toggle: Code Execution */}
               <button
                 type="button"
-                onClick={() => toggleTool('codeExecution')}
+                onClick={() => toggleTool("codeExecution")}
                 className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-text-body hover:text-text-primary rounded-[2px] transition-colors border-l-2 border-transparent hover:border-accent-primary cursor-pointer"
               >
                 <span>Code execution</span>
                 {activeTools.codeExecution && (
-                  <span className="font-mono text-xs text-accent-primary font-bold">✓</span>
+                  <span className="font-mono text-xs text-accent-primary font-bold">
+                    ✓
+                  </span>
                 )}
               </button>
 
               {/* Tool Toggle: Deep Research */}
               <button
                 type="button"
-                onClick={() => toggleTool('deepResearch')}
+                onClick={() => toggleTool("deepResearch")}
                 className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-text-body hover:text-text-primary rounded-[2px] transition-colors border-l-2 border-transparent hover:border-accent-primary cursor-pointer"
               >
                 <span>Deep research</span>
                 {activeTools.deepResearch && (
-                  <span className="font-mono text-xs text-accent-primary font-bold">✓</span>
+                  <span className="font-mono text-xs text-accent-primary font-bold">
+                    ✓
+                  </span>
                 )}
               </button>
             </div>
@@ -645,17 +704,19 @@ export const InputBar: React.FC<InputBarProps> = ({
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 6 }}
-            transition={{ duration: 0.12, ease: 'easeOut' }}
+            transition={{ duration: 0.12, ease: "easeOut" }}
             className="absolute bottom-full left-6 mb-2 w-80 rounded-[4px] border border-border bg-surface-2 p-1.5 shadow-xl z-30 space-y-0.5"
           >
             <div className="flex items-center justify-between px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-text-muted border-b border-border/40">
               <span>COMMANDS</span>
               {slashQuery && (
-                <span className="text-accent-primary">matching &ldquo;{slashQuery}&rdquo;</span>
+                <span className="text-accent-primary">
+                  matching &ldquo;{slashQuery}&rdquo;
+                </span>
               )}
             </div>
             {filteredSlashCommands.map((cmd, idx) => {
-              const isSelected = idx === slashSelectedIndex
+              const isSelected = idx === slashSelectedIndex;
               return (
                 <button
                   key={cmd.command}
@@ -664,8 +725,8 @@ export const InputBar: React.FC<InputBarProps> = ({
                   onMouseEnter={() => setSlashSelectedIndex(idx)}
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[2px] transition-colors cursor-pointer ${
                     isSelected
-                      ? 'border-l-2 border-accent-primary bg-surface-1 text-text-primary'
-                      : 'border-l-2 border-transparent hover:bg-surface-1/50 text-text-body'
+                      ? "border-l-2 border-accent-primary bg-surface-1 text-text-primary"
+                      : "border-l-2 border-transparent hover:bg-surface-1/50 text-text-body"
                   }`}
                 >
                   <div className="flex flex-col">
@@ -676,9 +737,11 @@ export const InputBar: React.FC<InputBarProps> = ({
                       {cmd.description}
                     </span>
                   </div>
-                  <span className="font-mono text-[10px] text-accent-primary">↵</span>
+                  <span className="font-mono text-[10px] text-accent-primary">
+                    ↵
+                  </span>
                 </button>
-              )
+              );
             })}
           </motion.div>
         )}
@@ -691,13 +754,15 @@ export const InputBar: React.FC<InputBarProps> = ({
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 6 }}
-            transition={{ duration: 0.12, ease: 'easeOut' }}
+            transition={{ duration: 0.12, ease: "easeOut" }}
             className="absolute bottom-full left-6 mb-2 w-80 rounded-[4px] border border-border bg-surface-2 p-1.5 shadow-xl z-30 space-y-0.5"
           >
             <div className="flex items-center justify-between px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-text-muted border-b border-border/40">
               <span>ATTACH ARTIFACT REFERENCE</span>
               {atQuery && (
-                <span className="text-accent-primary">matching &ldquo;{atQuery}&rdquo;</span>
+                <span className="text-accent-primary">
+                  matching &ldquo;{atQuery}&rdquo;
+                </span>
               )}
             </div>
             {availableAtFiles.map((file) => (
@@ -708,10 +773,16 @@ export const InputBar: React.FC<InputBarProps> = ({
                 className="w-full flex items-center justify-between px-2.5 py-1.5 text-left rounded-[2px] transition-colors cursor-pointer border-l-2 border-transparent hover:border-accent-primary hover:bg-surface-1 text-text-body"
               >
                 <div className="flex items-center gap-2 truncate">
-                  <span className="font-mono text-xs text-accent-primary font-bold">@</span>
-                  <span className="font-mono text-xs text-text-primary truncate">{file}</span>
+                  <span className="font-mono text-xs text-accent-primary font-bold">
+                    @
+                  </span>
+                  <span className="font-mono text-xs text-text-primary truncate">
+                    {file}
+                  </span>
                 </div>
-                <span className="font-mono text-[10px] text-accent-primary shrink-0 font-semibold">Attach</span>
+                <span className="font-mono text-[10px] text-accent-primary shrink-0 font-semibold">
+                  Attach
+                </span>
               </button>
             ))}
           </motion.div>
@@ -725,8 +796,8 @@ export const InputBar: React.FC<InputBarProps> = ({
         onDrop={handleDrop}
         className={`relative flex flex-col rounded-[4px] border bg-surface-2 shadow-[0_4px_0_#110E0A] transition-all ${
           isDragOver
-            ? 'border-accent-primary bg-accent-primary/5 ring-2 ring-accent-primary/50'
-            : 'border-border'
+            ? "border-accent-primary bg-accent-primary/5 ring-2 ring-accent-primary/50"
+            : "border-border"
         }`}
       >
         {/* Model Indicator Strip */}
@@ -738,7 +809,7 @@ export const InputBar: React.FC<InputBarProps> = ({
             </span>
           </div>
           <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">
-            {isStreaming ? 'Synthesizing…' : 'Ready'}
+            {isStreaming ? "Synthesizing…" : "Ready"}
           </span>
         </div>
 
@@ -747,7 +818,7 @@ export const InputBar: React.FC<InputBarProps> = ({
           {speechError && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
+              animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
               className="flex items-center justify-between bg-red-950/40 border-b border-red-500/30 px-3.5 py-1.5 text-xs text-red-300"
             >
@@ -790,7 +861,13 @@ export const InputBar: React.FC<InputBarProps> = ({
                 {/* Real-time Dynamic Audio Equalizer Bars */}
                 <div className="flex items-end gap-[3px] h-3.5 px-1.5 py-0.5 bg-surface-1/80 rounded-[3px] border border-accent-primary/20">
                   {[0.4, 0.9, 0.6, 1.0, 0.7, 0.3].map((multiplier, idx) => {
-                    const barHeight = Math.max(3, Math.min(14, audioLevel * 18 * multiplier + (idx % 2 === 0 ? 3 : 2)))
+                    const barHeight = Math.max(
+                      3,
+                      Math.min(
+                        14,
+                        audioLevel * 18 * multiplier + (idx % 2 === 0 ? 3 : 2),
+                      ),
+                    );
                     return (
                       <motion.span
                         key={idx}
@@ -798,7 +875,7 @@ export const InputBar: React.FC<InputBarProps> = ({
                         transition={{ duration: 0.08 }}
                         className="w-[2.5px] rounded-full bg-accent-primary"
                       />
-                    )
+                    );
                   })}
                 </div>
               </div>
@@ -806,7 +883,7 @@ export const InputBar: React.FC<InputBarProps> = ({
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   type="button"
-                  onClick={stopVoiceInput}
+                  onClick={() => stopVoiceInput()}
                   className="rounded-[2px] bg-accent-primary px-2 py-0.5 font-mono text-[10px] font-semibold text-background hover:bg-accent-primary/90 transition-colors cursor-pointer"
                 >
                   Done ✓
@@ -822,11 +899,29 @@ export const InputBar: React.FC<InputBarProps> = ({
               exit={{ opacity: 0, y: -6 }}
               className="flex items-center gap-2 bg-surface-2 border-b border-accent-primary/30 px-3.5 py-1.5 text-xs text-text-primary font-mono"
             >
-              <svg className="animate-spin h-3.5 w-3.5 text-accent-primary shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              <svg
+                className="animate-spin h-3.5 w-3.5 text-accent-primary shrink-0"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                ></circle>
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
               </svg>
-              <span className="text-accent-primary text-[11px]">Transcribing audio with Whisper AI…</span>
+              <span className="text-accent-primary text-[11px]">
+                Transcribing audio with Whisper AI…
+              </span>
             </motion.div>
           )}
         </AnimatePresence>
@@ -840,7 +935,9 @@ export const InputBar: React.FC<InputBarProps> = ({
             value={inputText}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder={isListening ? 'Dictating live audio... speak now' : placeholder}
+            placeholder={
+              isListening ? "Dictating live audio... speak now" : placeholder
+            }
             className="w-full resize-none bg-transparent font-display text-[15px] text-text-primary placeholder:italic placeholder:text-text-placeholder focus:outline-none leading-relaxed"
           />
         </div>
@@ -854,8 +951,8 @@ export const InputBar: React.FC<InputBarProps> = ({
               onClick={() => setIsAttachmentOpen((p) => !p)}
               className={`flex h-7 w-7 items-center justify-center rounded-[2px] transition-colors cursor-pointer ${
                 isAttachmentOpen
-                  ? 'bg-surface-1 text-accent-primary border border-accent-primary/40'
-                  : 'hover:bg-surface-1 hover:text-text-primary'
+                  ? "bg-surface-1 text-accent-primary border border-accent-primary/40"
+                  : "hover:bg-surface-1 hover:text-text-primary"
               }`}
               title="Tool & Attachment Menu"
             >
@@ -880,10 +977,14 @@ export const InputBar: React.FC<InputBarProps> = ({
               onClick={toggleVoiceInput}
               className={`relative flex items-center justify-center rounded-[2px] transition-all cursor-pointer ${
                 isListening
-                  ? 'h-7 px-2 gap-1.5 bg-accent-primary/20 text-accent-primary border border-accent-primary shadow-xs font-semibold'
-                  : 'h-7 w-7 hover:bg-surface-1 hover:text-text-primary'
+                  ? "h-7 px-2 gap-1.5 bg-accent-primary/20 text-accent-primary border border-accent-primary shadow-xs font-semibold"
+                  : "h-7 w-7 hover:bg-surface-1 hover:text-text-primary"
               }`}
-              title={isListening ? 'Stop Voice Recording (Dictating...)' : 'Voice Input (Dictate prompt)'}
+              title={
+                isListening
+                  ? "Stop Voice Recording (Dictating...)"
+                  : "Voice Input (Dictate prompt)"
+              }
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -895,7 +996,9 @@ export const InputBar: React.FC<InputBarProps> = ({
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className={isListening ? 'text-accent-primary animate-pulse' : ''}
+                className={
+                  isListening ? "text-accent-primary animate-pulse" : ""
+                }
               >
                 <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
                 <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
@@ -907,6 +1010,24 @@ export const InputBar: React.FC<InputBarProps> = ({
                 </span>
               )}
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const next = !voiceMode;
+                setVoiceMode(next);
+                if (next && !isListening) void startVoiceInput();
+                if (!next && isListening) stopVoiceInput();
+              }}
+              className={`flex h-7 items-center gap-1 rounded-[2px] border px-2 font-mono text-[9px] uppercase tracking-wider transition-colors cursor-pointer ${voiceMode ? "border-accent-primary/70 bg-accent-primary/15 text-accent-primary" : "border-border/70 text-text-muted hover:border-accent-primary/50 hover:text-text-primary"}`}
+              title="Toggle hands-free voice conversation"
+              aria-pressed={voiceMode}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${voiceMode ? "bg-accent-primary animate-pulse" : "bg-text-muted"}`}
+              />
+              Voice loop
+            </button>
           </div>
 
           {/* Send / Queue / Stop Button */}
@@ -916,10 +1037,10 @@ export const InputBar: React.FC<InputBarProps> = ({
               onClick={() => handleSubmit()}
               animate={{
                 scale: isSendFlashing ? 0.94 : 1,
-                filter: isSendFlashing ? 'brightness(1.3)' : 'brightness(1)',
-                backgroundColor: isSendFlashing ? '#F5A66B' : '#D97A3F',
+                filter: isSendFlashing ? "brightness(1.3)" : "brightness(1)",
+                backgroundColor: isSendFlashing ? "#F5A66B" : "#D97A3F",
               }}
-              transition={{ duration: 0.12, ease: 'easeOut' }}
+              transition={{ duration: 0.12, ease: "easeOut" }}
               className="relative flex h-8 px-2.5 items-center justify-center gap-1 rounded-[2px] bg-accent-primary text-background font-mono font-bold text-[11px] shadow-sm hover:brightness-110 transition-all cursor-pointer"
               title="Add to queue (Enter)"
             >
@@ -945,15 +1066,17 @@ export const InputBar: React.FC<InputBarProps> = ({
               onClick={() => handleSubmit()}
               animate={{
                 scale: isSendFlashing ? 0.94 : 1,
-                filter: isSendFlashing ? 'brightness(1.3)' : 'brightness(1)',
-                backgroundColor: isSendFlashing ? '#F5A66B' : '#D97A3F',
+                filter: isSendFlashing ? "brightness(1.3)" : "brightness(1)",
+                backgroundColor: isSendFlashing ? "#F5A66B" : "#D97A3F",
               }}
-              transition={{ duration: 0.12, ease: 'easeOut' }}
+              transition={{ duration: 0.12, ease: "easeOut" }}
               disabled={!inputText.trim() && !isStreaming}
               className={`relative flex h-8 w-8 items-center justify-center rounded-[2px] bg-accent-primary text-background font-bold transition-opacity cursor-pointer ${
-                !inputText.trim() && !isStreaming ? 'opacity-40 cursor-not-allowed' : 'hover:brightness-110'
+                !inputText.trim() && !isStreaming
+                  ? "opacity-40 cursor-not-allowed"
+                  : "hover:brightness-110"
               }`}
-              title={isStreaming ? 'Stop generation' : 'Send message (Enter)'}
+              title={isStreaming ? "Stop generation" : "Send message (Enter)"}
             >
               <div className="relative flex items-center justify-center w-4 h-4">
                 {/* Morphing Stem / Stop Square */}
@@ -974,7 +1097,7 @@ export const InputBar: React.FC<InputBarProps> = ({
                           y: 1,
                         }
                   }
-                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
                   className="absolute bg-background pointer-events-none"
                 />
                 {/* Morphing Arrowhead / Chevron */}
@@ -997,7 +1120,7 @@ export const InputBar: React.FC<InputBarProps> = ({
                           y: -2.5,
                         }
                   }
-                  transition={{ duration: 0.15, ease: 'easeOut' }}
+                  transition={{ duration: 0.15, ease: "easeOut" }}
                   className="absolute border-t-[2.5px] border-l-[2.5px] border-background rotate-45 pointer-events-none"
                 />
               </div>
@@ -1006,7 +1129,7 @@ export const InputBar: React.FC<InputBarProps> = ({
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default InputBar
+export default InputBar;
