@@ -36,6 +36,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     sendMessage,
     activeArtifact,
     openSettings,
+    openShortcuts,
   } = useWorkbench()
 
   const [query, setQuery] = useState('')
@@ -137,6 +138,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
     if (item.id === 'cmd-act-settings' || item.title.toLowerCase().includes('setting') || item.title.toLowerCase().includes('preference')) {
       openSettings()
+      onClose()
+      return
+    }
+
+    if (item.id === 'cmd-act-shortcuts' || item.title.toLowerCase().includes('keybind') || item.title.toLowerCase().includes('shortcut')) {
+      openShortcuts()
       onClose()
       return
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   SlidersHorizontal,
@@ -23,10 +23,39 @@ import {
   Volume2,
   Sun,
   Moon,
+  Keyboard,
+  RotateCcw,
+  Edit2,
+  Globe,
+  FolderGit2,
+  Bell,
+  Zap,
+  Radio,
 } from 'lucide-react'
+import { useWorkbench } from '../lib/WorkbenchContext'
+import { KeyboardShortcutsModal } from '../components/layout/KeyboardShortcutsModal'
+import {
+  formatKeyComboDisplay,
+  eventToKeyCombo,
+} from '../lib/keybindings'
+import { api } from '../lib/api'
+import { playCompletionChime } from '../lib/audioChime'
+import {
+  requestDesktopNotificationPermission,
+  getDesktopNotificationPermission,
+  sendDesktopNotification,
+} from '../lib/notifications'
+import {
+  type WorkbenchSettings,
+  loadSavedSettings,
+  saveSettings,
+  getLanguageCode,
+  SETTINGS_STORAGE_KEY,
+} from '../lib/settings'
 
 export type SettingsTab =
   | 'general'
+  | 'keybindings'
   | 'personalization'
   | 'models'
   | 'appearance'
@@ -45,6 +74,7 @@ interface SettingsNavOption {
 
 const SETTINGS_NAV: SettingsNavOption[] = [
   { id: 'general', label: 'General', icon: SlidersHorizontal },
+  { id: 'keybindings', label: 'Keybindings & Shortcuts', icon: Keyboard, badge: 'HOTKEYS' },
   { id: 'personalization', label: 'Personalization', icon: User },
   { id: 'models', label: 'AI & Models', icon: Cpu },
   { id: 'appearance', label: 'Appearance', icon: Palette },
@@ -55,129 +85,7 @@ const SETTINGS_NAV: SettingsNavOption[] = [
   { id: 'about', label: 'About', icon: Info },
 ]
 
-const STORAGE_KEY = 'workbench_settings_config_v1'
-
-interface WorkbenchSettings {
-  // 1. General
-  language: string
-  defaultWorkspace: string
-  startupBehavior: 'resume' | 'new_chat' | 'projects'
-  audioChimeOnCompletion: boolean
-  desktopNotifications: boolean
-  streamingAlert: boolean
-
-  // 2. Personalization
-  responseStyle: 'professional' | 'concise' | 'detailed' | 'technical'
-  customInstructions: string
-  preferStructuredResponses: boolean
-  includeSourceReferences: boolean
-  showAgentActivity: boolean
-  preferConciseAnswers: boolean
-  defaultArtifactView: 'preview' | 'code' | 'split'
-  defaultSplitRatio: '50/50' | '40/60' | '60/40' | '70/30'
-
-  // 3. AI & Models
-  defaultEngine: string
-  reasoningModel: string
-  visionModel: string
-  embeddingModel: string
-  temperature: number
-  reasoningEffort: 'high' | 'medium' | 'low'
-
-  // 4. Appearance
-  theme: 'dark' | 'dim' | 'system'
-  workbenchAccent: string
-  filmGrainEnabled: boolean
-  density: 'comfortable' | 'compact'
-
-  // 5. Security & Privacy
-  zeroEgress: boolean
-  auditLogging: boolean
-  sandboxExecution: boolean
-  localVoiceTranscription: boolean
-
-  // 6. Data & Storage
-  dataRetention: 'indefinite' | '30days' | 'ephemeral'
-  autoSaveArtifacts: boolean
-
-  // 7. Audio
-  audioInputDevice: string
-  localWhisperModel: string
-  voiceInputMode: 'push_to_talk' | 'vad'
-  noiseSuppression: boolean
-  voiceFeedbackChime: boolean
-
-  // 8. Developer
-  mcpEndpoint: string
-  mcpProjectId: string
-  telemetryStreaming: boolean
-  verboseLangGraphLogging: boolean
-  sandboxMemoryLimitMb: number
-  sandboxTimeoutSeconds: number
-}
-
-const DEFAULT_SETTINGS: WorkbenchSettings = {
-  language: 'English (US)',
-  defaultWorkspace: '~/.workbench/enclave_workspace',
-  startupBehavior: 'resume',
-  audioChimeOnCompletion: false,
-  desktopNotifications: true,
-  streamingAlert: true,
-
-  responseStyle: 'professional',
-  customInstructions: 'Prefer concise, modular TypeScript code with strict typing. Cite internal document references when answering engineering queries.',
-  preferStructuredResponses: true,
-  includeSourceReferences: true,
-  showAgentActivity: true,
-  preferConciseAnswers: false,
-  defaultArtifactView: 'preview',
-  defaultSplitRatio: '50/50',
-
-  defaultEngine: 'llama3.1:8b (Sovereign Reasoning)',
-  reasoningModel: 'llama3.1:8b (Primary Orchestrator)',
-  visionModel: 'qwen2-vl:7b-instruct-q4_K_M (Local OCR & Diagrams)',
-  embeddingModel: 'bge-m3 (Dense 1024-dim Local RAG)',
-  temperature: 0.2,
-  reasoningEffort: 'high',
-
-  theme: 'dark',
-  workbenchAccent: '#D97A3F',
-  filmGrainEnabled: true,
-  density: 'comfortable',
-
-  zeroEgress: true,
-  auditLogging: true,
-  sandboxExecution: true,
-  localVoiceTranscription: true,
-
-  dataRetention: 'indefinite',
-  autoSaveArtifacts: true,
-
-  audioInputDevice: 'Default - High Definition Audio Device',
-  localWhisperModel: 'faster-whisper-base.en (Low Latency)',
-  voiceInputMode: 'push_to_talk',
-  noiseSuppression: true,
-  voiceFeedbackChime: true,
-
-  mcpEndpoint: 'https://stitch.googleapis.com/mcp',
-  mcpProjectId: 'projects/12582686884709768980',
-  telemetryStreaming: true,
-  verboseLangGraphLogging: false,
-  sandboxMemoryLimitMb: 512,
-  sandboxTimeoutSeconds: 10,
-}
-
-function loadInitialSettings(): WorkbenchSettings {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) }
-    }
-  } catch (e) {
-    console.error('Failed to load settings from localStorage:', e)
-  }
-  return DEFAULT_SETTINGS
-}
+const STORAGE_KEY = SETTINGS_STORAGE_KEY
 
 export interface SettingsPageProps {
   isOpen?: boolean
@@ -190,8 +98,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   onClose,
   isModal = true,
 }) => {
+  const wb = useWorkbench()
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
-  const [settings, setSettings] = useState<WorkbenchSettings>(loadInitialSettings)
+  const [settings, setSettings] = useState<WorkbenchSettings>(() => wb?.settings || loadSavedSettings())
   const [savedSuccess, setSavedSuccess] = useState(false)
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false)
   const [clearCacheModalOpen, setClearCacheModalOpen] = useState(false)
@@ -202,6 +111,94 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [verifyingIntegrity, setVerifyingIntegrity] = useState(false)
   const [mcpPingStatus, setMcpPingStatus] = useState<'idle' | 'testing' | 'connected'>('idle')
   const modalPanelRef = useRef<HTMLDivElement>(null)
+
+  // Workspaces fetching & management
+  const [availableWorkspaces, setAvailableWorkspaces] = useState<Array<{ id: string; name: string; description?: string }>>([])
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(false)
+
+  const fetchWorkspaces = useCallback(async () => {
+    setLoadingWorkspaces(true)
+    try {
+      const list = await api.getWorkspaces()
+      if (Array.isArray(list)) {
+        setAvailableWorkspaces(list)
+      }
+    } catch (e) {
+      console.warn('Failed to load workspaces list:', e)
+    } finally {
+      setLoadingWorkspaces(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchWorkspaces()
+  }, [fetchWorkspaces])
+
+  // Sync settings when context updates
+  useEffect(() => {
+    if (wb?.settings) {
+      setSettings(wb.settings)
+    }
+  }, [wb?.settings])
+
+  // Desktop notifications & sound test states
+  const [desktopPermission, setDesktopPermission] = useState<NotificationPermission>(() => getDesktopNotificationPermission())
+  const [testNotificationSent, setTestNotificationSent] = useState(false)
+  const [testChimePlayed, setTestChimePlayed] = useState(false)
+  const [testStreamingActive, setTestStreamingActive] = useState(false)
+  const [langToast, setLangToast] = useState<string | null>(null)
+
+  let openShortcutsModal: () => void = () => setShortcutsModalOpen(true)
+  let keybindings: any[] = []
+  let updateKeybinding: (id: string, newKey: string) => void = () => {}
+  let resetKeybindings: () => void = () => {}
+
+  if (wb) {
+    if (wb.openShortcuts) openShortcutsModal = wb.openShortcuts
+    if (wb.keybindings) keybindings = wb.keybindings
+    if (wb.updateKeybinding) updateKeybinding = wb.updateKeybinding
+    if (wb.resetKeybindings) resetKeybindings = wb.resetKeybindings
+  }
+
+  const [shortcutSearch, setShortcutSearch] = useState('')
+  const [shortcutCategory, setShortcutCategory] = useState<'all' | 'navigation' | 'workbench' | 'general'>('all')
+  const [editingKeyId, setEditingKeyId] = useState<string | null>(null)
+  const [recordedCombo, setRecordedCombo] = useState<string | null>(null)
+  const [conflictWarning, setConflictWarning] = useState<string | null>(null)
+
+  // Listen for key recording when editing a shortcut inline in Settings
+  useEffect(() => {
+    if (!editingKeyId) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+
+      // Allow cancelling with bare Escape if no modifiers
+      if (e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        setEditingKeyId(null)
+        setRecordedCombo(null)
+        setConflictWarning(null)
+        return
+      }
+
+      const combo = eventToKeyCombo(e)
+      if (combo) {
+        setRecordedCombo(combo)
+        const existing = keybindings.find(
+          (k) => k.id !== editingKeyId && k.currentKey.toLowerCase() === combo.toLowerCase()
+        )
+        if (existing) {
+          setConflictWarning(`Conflicts with "${existing.name}"`)
+        } else {
+          setConflictWarning(null)
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [editingKeyId, keybindings])
 
   // Auto-save changes to localStorage
   useEffect(() => {
@@ -239,7 +236,66 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   }, [isOpen, isModal, onClose, shortcutsModalOpen, clearCacheModalOpen, deleteDataModalOpen])
 
   const updateSetting = <K extends keyof WorkbenchSettings>(key: K, value: WorkbenchSettings[K]) => {
-    setSettings((prev) => ({ ...prev, [key]: value }))
+    setSettings((prev) => {
+      const updated = { ...prev, [key]: value }
+      saveSettings(updated)
+      return updated
+    })
+    wb?.updateSetting?.(key, value)
+    if (key === 'language') {
+      setLangToast(`Interface locale updated to ${value}`)
+      setTimeout(() => setLangToast(null), 2500)
+    }
+  }
+
+  const handleToggleNotifications = async (val: boolean) => {
+    updateSetting('desktopNotifications', val)
+    if (val && typeof window !== 'undefined' && 'Notification' in window) {
+      const perm = await requestDesktopNotificationPermission()
+      setDesktopPermission(perm)
+    }
+  }
+
+  const handleSendTestNotification = () => {
+    if (desktopPermission !== 'granted') {
+      requestDesktopNotificationPermission().then((perm) => {
+        setDesktopPermission(perm)
+        if (perm === 'granted') {
+          sendDesktopNotification('Sovereign Enclave Notification', {
+            body: 'Desktop notifications are active & operational in this air-gap environment.',
+          })
+        }
+      })
+    } else {
+      sendDesktopNotification('Sovereign Enclave Notification', {
+        body: 'Desktop notifications are active & operational in this air-gap environment.',
+      })
+    }
+    setTestNotificationSent(true)
+    setTimeout(() => setTestNotificationSent(false), 2500)
+  }
+
+  const handlePlayTestChime = () => {
+    playCompletionChime()
+    setTestChimePlayed(true)
+    setTimeout(() => setTestChimePlayed(false), 1800)
+  }
+
+  const handleTestStreamingAlert = () => {
+    setTestStreamingActive(true)
+    let step = 0
+    const symbols = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+    const originalTitle = document.title
+    const interval = setInterval(() => {
+      document.title = `[${symbols[step % symbols.length]} Test Token Stream 64 t/s] Sovereign Workbench`
+      step++
+    }, 120)
+
+    setTimeout(() => {
+      clearInterval(interval)
+      document.title = originalTitle
+      setTestStreamingActive(false)
+    }, 3000)
   }
 
   const handleManualSave = () => {
@@ -547,139 +603,530 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               TAB 1: GENERAL
               ===================================================================== */}
           {activeTab === 'general' && (
-            <div className="space-y-5">
-              {/* Language */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 py-2.5 border-b border-border/50">
-                <div>
-                  <span className="font-body text-xs font-medium text-text-primary block">
-                    Language
-                  </span>
-                  <span className="font-body text-[11px] text-text-muted mt-0.5 block">
-                    Select the interface and system prompt localized display language.
-                  </span>
+            <div className="space-y-6">
+              {/* Language & Localized Display */}
+              <div className="rounded-[4px] border border-border/70 bg-surface-1/40 p-4 transition-all hover:border-border">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Globe className="w-4 h-4 text-accent-primary" />
+                      <span className="font-body text-xs font-semibold text-text-primary">
+                        Interface Language & System Locale
+                      </span>
+                      <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-surface-2 border border-border/70 text-text-muted">
+                        {getLanguageCode(settings.language)}
+                      </span>
+                    </div>
+                    <span className="font-body text-[11px] text-text-muted block">
+                      Select localized interface typography, system prompt instructions, and date formats.
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={settings.language}
+                      onChange={(e) => updateSetting('language', e.target.value)}
+                      className="rounded-[3px] border border-border bg-surface-2 px-3 py-1.5 font-body text-xs text-text-primary focus:border-accent-primary focus:outline-none cursor-pointer w-full sm:w-56"
+                    >
+                      <option value="English (US)">English (US) — Default</option>
+                      <option value="English (UK)">English (UK)</option>
+                      <option value="Deutsch">Deutsch (German)</option>
+                      <option value="Français">Français (French)</option>
+                      <option value="Español">Español (Spanish)</option>
+                      <option value="日本語">日本語 (Japanese)</option>
+                    </select>
+                  </div>
                 </div>
-                <select
-                  value={settings.language}
-                  onChange={(e) => updateSetting('language', e.target.value)}
-                  className="rounded-[2px] border border-border bg-surface-2 px-2.5 py-1 font-body text-xs text-text-primary focus:border-accent-primary focus:outline-none cursor-pointer w-full sm:w-52"
-                >
-                  <option>English (US)</option>
-                  <option>English (UK)</option>
-                  <option>Deutsch</option>
-                  <option>Français</option>
-                  <option>Español</option>
-                  <option>日本語</option>
-                </select>
+
+                {langToast && (
+                  <div className="mt-2.5 flex items-center gap-2 rounded bg-accent-primary/10 border border-accent-primary/30 px-2.5 py-1 text-[11px] text-accent-primary font-mono animate-fade-in">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{langToast}</span>
+                  </div>
+                )}
               </div>
 
-              {/* Default Workspace */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 py-2.5 border-b border-border/50">
-                <div>
-                  <span className="font-body text-xs font-medium text-text-primary block">
-                    Default Workspace
-                  </span>
-                  <span className="font-body text-[11px] text-text-muted mt-0.5 block">
-                    Local enclave directory mounted for document RAG and artifact output.
-                  </span>
+              {/* Default Workspace Enclave */}
+              <div className="rounded-[4px] border border-border/70 bg-surface-1/40 p-4 transition-all hover:border-border space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <FolderGit2 className="w-4 h-4 text-accent-primary" />
+                      <span className="font-body text-xs font-semibold text-text-primary">
+                        Default Enclave Workspace
+                      </span>
+                      <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/30 border border-emerald-500/30 text-emerald-400">
+                        Air-Gapped Mount
+                      </span>
+                    </div>
+                    <span className="font-body text-[11px] text-text-muted block">
+                      Active workspace mounted for document vector indexing, sandboxed execution, and artifact downloads.
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={fetchWorkspaces}
+                    disabled={loadingWorkspaces}
+                    className="flex items-center gap-1.5 rounded-[3px] border border-border bg-surface-2 px-2.5 py-1 text-xs text-text-muted hover:text-text-primary hover:border-accent-primary/50 transition-colors cursor-pointer self-start sm:self-auto shrink-0"
+                    title="Rescan active workspaces from backend"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingWorkspaces ? 'animate-spin text-accent-primary' : ''}`} />
+                    <span>{loadingWorkspaces ? 'Scanning...' : 'Rescan Enclaves'}</span>
+                  </button>
                 </div>
-                <input
-                  type="text"
-                  value={settings.defaultWorkspace}
-                  onChange={(e) => updateSetting('defaultWorkspace', e.target.value)}
-                  className="rounded-[2px] border border-border bg-surface-2 px-2.5 py-1 font-mono text-xs text-text-primary focus:border-accent-primary focus:outline-none w-full sm:w-60"
-                />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <div>
+                    <label className="font-mono text-[10px] uppercase text-text-muted block mb-1">
+                      Select Active Workspace
+                    </label>
+                    <select
+                      value={availableWorkspaces.some((w) => w.id === settings.defaultWorkspace) ? settings.defaultWorkspace : 'custom'}
+                      onChange={(e) => {
+                        if (e.target.value !== 'custom') {
+                          updateSetting('defaultWorkspace', e.target.value)
+                        }
+                      }}
+                      className="w-full rounded-[3px] border border-border bg-surface-2 px-2.5 py-1.5 font-body text-xs text-text-primary focus:border-accent-primary focus:outline-none cursor-pointer"
+                    >
+                      <option value="default_workspace">default_workspace (Primary Enclave)</option>
+                      {availableWorkspaces
+                        .filter((w) => w.id !== 'default_workspace')
+                        .map((w) => (
+                          <option key={w.id} value={w.id}>
+                            {w.name} ({w.id})
+                          </option>
+                        ))}
+                      <option value="custom">Custom Enclave Directory Path...</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-mono text-[10px] uppercase text-text-muted block mb-1">
+                      Mounted Path / Identifier
+                    </label>
+                    <input
+                      type="text"
+                      value={settings.defaultWorkspace}
+                      onChange={(e) => updateSetting('defaultWorkspace', e.target.value)}
+                      placeholder="e.g. default_workspace or /enclave/workspace"
+                      className="w-full rounded-[3px] border border-border bg-surface-2 px-2.5 py-1.5 font-mono text-xs text-text-primary focus:border-accent-primary focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 text-[11px] font-mono text-text-muted/80 bg-background/60 p-2 rounded border border-border/40">
+                  <span className="text-accent-primary">●</span>
+                  <span>Active Workspace: <span className="text-text-primary font-medium">{settings.defaultWorkspace}</span></span>
+                  <span className="text-text-muted/50">|</span>
+                  <span>Discovered Workspaces: <span className="text-text-primary">{availableWorkspaces.length || 1}</span></span>
+                </div>
               </div>
 
               {/* Startup Behavior */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 py-2.5 border-b border-border/50">
-                <div>
-                  <span className="font-body text-xs font-medium text-text-primary block">
-                    Startup Behavior
-                  </span>
-                  <span className="font-body text-[11px] text-text-muted mt-0.5 block">
-                    Action executed when launching the Sovereign Workbench UI.
+              <div className="rounded-[4px] border border-border/70 bg-surface-1/40 p-4 transition-all hover:border-border space-y-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-accent-primary" />
+                    <span className="font-body text-xs font-semibold text-text-primary">
+                      Workbench Startup Behavior
+                    </span>
+                  </div>
+                  <span className="font-body text-[11px] text-text-muted block">
+                    Choose what view or session loads when launching or opening the Sovereign Workbench.
                   </span>
                 </div>
-                <select
-                  value={settings.startupBehavior}
-                  onChange={(e) => updateSetting('startupBehavior', e.target.value as 'resume' | 'new_chat' | 'projects')}
-                  className="rounded-[2px] border border-border bg-surface-2 px-2.5 py-1 font-body text-xs text-text-primary focus:border-accent-primary focus:outline-none cursor-pointer w-full sm:w-52"
-                >
-                  <option value="resume">Resume last active session</option>
-                  <option value="new_chat">Open new blank chat</option>
-                  <option value="projects">Open Projects overview</option>
-                </select>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  {[
+                    {
+                      id: 'resume',
+                      title: 'Resume Session',
+                      desc: 'Auto-load the latest active chat session from encrypted history.',
+                    },
+                    {
+                      id: 'new_chat',
+                      title: 'New Clean Chat',
+                      desc: 'Start fresh with a blank canvas and prompt bar ready.',
+                    },
+                    {
+                      id: 'projects',
+                      title: 'Projects Overview',
+                      desc: 'Open the workspace directory and document repository browser.',
+                    },
+                  ].map((option) => {
+                    const isSelected = settings.startupBehavior === option.id
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => updateSetting('startupBehavior', option.id as any)}
+                        className={`rounded-[3px] border p-3 text-left transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                          isSelected
+                            ? 'border-accent-primary bg-accent-primary/10 shadow-[0_0_12px_rgba(217,122,63,0.15)]'
+                            : 'border-border bg-surface-2 hover:border-text-muted/60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`font-body text-xs font-semibold ${isSelected ? 'text-accent-primary' : 'text-text-primary'}`}>
+                            {option.title}
+                          </span>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-accent-primary" />}
+                        </div>
+                        <span className="font-body text-[11px] text-text-muted leading-tight">
+                          {option.desc}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
 
               {/* Keyboard Shortcuts Reference */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 py-2.5 border-b border-border/50">
-                <div>
-                  <span className="font-body text-xs font-medium text-text-primary block">
-                    Keyboard Shortcuts
-                  </span>
-                  <span className="font-body text-[11px] text-text-muted mt-0.5 block">
-                    View global keybindings for navigation, palette, and split resizer.
-                  </span>
+              <div className="rounded-[4px] border border-border/70 bg-surface-1/40 p-4 transition-all hover:border-border">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Keyboard className="w-4 h-4 text-accent-primary" />
+                      <span className="font-body text-xs font-semibold text-text-primary">
+                        Keyboard Shortcuts & Keybindings
+                      </span>
+                    </div>
+                    <span className="font-body text-[11px] text-text-muted block">
+                      Custom hotkey bindings for rapid command palette, tool activation, and studio navigation.
+                    </span>
+                    <div className="flex items-center gap-1.5 pt-1.5 flex-wrap">
+                      <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-surface-2 border border-border/60 text-text-body">
+                        ⌘K Palette
+                      </span>
+                      <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-surface-2 border border-border/60 text-text-body">
+                        ⌘, Settings
+                      </span>
+                      <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-surface-2 border border-border/60 text-text-body">
+                        ⌘/ Hotkeys
+                      </span>
+                      <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-surface-2 border border-border/60 text-text-body">
+                        ⌘\ Sidebar
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('keybindings')}
+                    className="rounded-[3px] border border-border bg-surface-2 px-3 py-1.5 font-mono text-xs text-text-body hover:text-accent-primary hover:border-accent-primary/60 transition-colors cursor-pointer w-full sm:w-auto flex items-center justify-center gap-1.5 shrink-0"
+                  >
+                    <Keyboard className="w-3.5 h-3.5 text-accent-primary" />
+                    <span>Configure Keybindings (⌘/)</span>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShortcutsModalOpen(true)}
-                  className="rounded-[2px] border border-border bg-surface-2 px-2.5 py-1 font-mono text-xs text-text-body hover:text-accent-primary hover:border-accent-primary/60 transition-colors cursor-pointer w-full sm:w-auto"
-                >
-                  View Keybindings (⌘/)
-                </button>
               </div>
 
-              {/* Notifications */}
-              <div className="space-y-2.5 pt-1.5">
-                <span className="font-mono text-[10px] uppercase tracking-wider text-text-body block">
-                  Notifications & Alerts
-                </span>
-
-                <div className="flex items-center justify-between py-1.5 border-b border-border/40">
-                  <div>
-                    <span className="font-body text-xs font-medium text-text-primary block">
-                      System Desktop Notifications
+              {/* Notifications & Audio Alerts */}
+              <div className="rounded-[4px] border border-border/70 bg-surface-1/40 p-4 transition-all hover:border-border space-y-4">
+                <div className="space-y-1 border-b border-border/50 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Bell className="w-4 h-4 text-accent-primary" />
+                    <span className="font-body text-xs font-semibold text-text-primary">
+                      System Notifications & Operational Alerts
                     </span>
-                    <span className="font-body text-[11px] text-text-muted">
+                  </div>
+                  <span className="font-body text-[11px] text-text-muted block">
+                    Real-time notifications, acoustic cues, and live task stream status indicators.
+                  </span>
+                </div>
+
+                {/* 1. Desktop Notifications */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-2 border-b border-border/40">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-body text-xs font-medium text-text-primary">
+                        System Desktop Notifications
+                      </span>
+                      {desktopPermission === 'granted' && (
+                        <span className="font-mono text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/30 border border-emerald-500/30 text-emerald-400">
+                          Active 🟢
+                        </span>
+                      )}
+                      {desktopPermission === 'denied' && (
+                        <span className="font-mono text-[9px] px-1.5 py-0.2 rounded bg-red-950/30 border border-red-500/30 text-red-400">
+                          Blocked 🔴
+                        </span>
+                      )}
+                      {desktopPermission === 'default' && (
+                        <span className="font-mono text-[9px] px-1.5 py-0.2 rounded bg-amber-950/30 border border-amber-500/30 text-amber-400">
+                          Permission Needed 🟡
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-body text-[11px] text-text-muted block">
                       Notify when long-running multi-agent reasoning or batch RAG indexing completes.
                     </span>
                   </div>
-                  <ToggleSwitch
-                    checked={settings.desktopNotifications}
-                    onChange={(val) => updateSetting('desktopNotifications', val)}
-                  />
+
+                  <div className="flex items-center gap-2.5 self-end sm:self-center">
+                    <button
+                      type="button"
+                      onClick={handleSendTestNotification}
+                      className="rounded-[3px] border border-border bg-surface-2 px-2 py-1 text-[11px] font-mono text-text-muted hover:text-text-primary hover:border-accent-primary/60 transition-colors cursor-pointer flex items-center gap-1"
+                    >
+                      <Bell className="w-3 h-3 text-accent-primary" />
+                      <span>{testNotificationSent ? 'Sent ✓' : 'Test Alert'}</span>
+                    </button>
+                    <ToggleSwitch
+                      checked={settings.desktopNotifications}
+                      onChange={handleToggleNotifications}
+                      label="Toggle Desktop Notifications"
+                    />
+                  </div>
                 </div>
 
-                <div className="flex items-center justify-between py-1.5 border-b border-border/40">
-                  <div>
-                    <span className="font-body text-xs font-medium text-text-primary block">
-                      Live Token Streaming Indicator
-                    </span>
-                    <span className="font-body text-[11px] text-text-muted">
-                      Pulse title bar during local model inference and token emission.
+                {/* 2. Live Token Streaming Indicator */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-2 border-b border-border/40">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-body text-xs font-medium text-text-primary">
+                        Live Token Streaming Indicator
+                      </span>
+                      {testStreamingActive && (
+                        <span className="font-mono text-[9px] px-1.5 py-0.2 rounded bg-accent-primary/20 border border-accent-primary text-accent-primary animate-pulse">
+                          Pulsing Title...
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-body text-[11px] text-text-muted block">
+                      Pulse browser title bar with spinner and token velocity during local model inference.
                     </span>
                   </div>
-                  <ToggleSwitch
-                    checked={settings.streamingAlert}
-                    onChange={(val) => updateSetting('streamingAlert', val)}
-                  />
+
+                  <div className="flex items-center gap-2.5 self-end sm:self-center">
+                    <button
+                      type="button"
+                      onClick={handleTestStreamingAlert}
+                      disabled={testStreamingActive}
+                      className="rounded-[3px] border border-border bg-surface-2 px-2 py-1 text-[11px] font-mono text-text-muted hover:text-text-primary hover:border-accent-primary/60 transition-colors cursor-pointer flex items-center gap-1"
+                    >
+                      <Zap className="w-3 h-3 text-accent-primary" />
+                      <span>{testStreamingActive ? 'Running...' : 'Test Pulse (3s)'}</span>
+                    </button>
+                    <ToggleSwitch
+                      checked={settings.streamingAlert}
+                      onChange={(val) => updateSetting('streamingAlert', val)}
+                      label="Toggle Token Streaming Indicator"
+                    />
+                  </div>
                 </div>
 
-                <div className="flex items-center justify-between py-1.5">
-                  <div>
-                    <span className="font-body text-xs font-medium text-text-primary block">
-                      Audio Chime on Completion
-                    </span>
-                    <span className="font-body text-[11px] text-text-muted">
-                      Play an acoustic cue when code sandbox execution finishes.
+                {/* 3. Audio Chime on Completion */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-2">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-body text-xs font-medium text-text-primary">
+                        Acoustic Chime on Completion
+                      </span>
+                      {testChimePlayed && (
+                        <span className="font-mono text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/30 border border-emerald-500/30 text-emerald-400">
+                          Chime Played 🔔
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-body text-[11px] text-text-muted block">
+                      Play an air-gapped Web Audio harmonic chime when sandbox code execution or reasoning finishes.
                     </span>
                   </div>
-                  <ToggleSwitch
-                    checked={settings.audioChimeOnCompletion}
-                    onChange={(val) => updateSetting('audioChimeOnCompletion', val)}
-                  />
+
+                  <div className="flex items-center gap-2.5 self-end sm:self-center">
+                    <button
+                      type="button"
+                      onClick={handlePlayTestChime}
+                      className="rounded-[3px] border border-border bg-surface-2 px-2 py-1 text-[11px] font-mono text-text-muted hover:text-text-primary hover:border-accent-primary/60 transition-colors cursor-pointer flex items-center gap-1"
+                    >
+                      <Volume2 className="w-3 h-3 text-accent-primary" />
+                      <span>{testChimePlayed ? 'Playing 🔊' : 'Play Sound'}</span>
+                    </button>
+                    <ToggleSwitch
+                      checked={settings.audioChimeOnCompletion}
+                      onChange={(val) => updateSetting('audioChimeOnCompletion', val)}
+                      label="Toggle Audio Chime"
+                    />
+                  </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* =====================================================================
+              TAB: KEYBINDINGS & SHORTCUTS
+              ===================================================================== */}
+          {activeTab === 'keybindings' && (
+            <div className="space-y-4">
+              {/* Header and Controls */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-border/60">
+                <div>
+                  <h4 className="font-display text-xs font-semibold text-text-primary flex items-center gap-2">
+                    Workbench Keyboard Shortcuts & Keybindings
+                    <span className="font-mono text-[9px] px-1.5 py-0.2 rounded bg-surface-2 border border-border/70 text-text-muted">
+                      Customizable
+                    </span>
+                  </h4>
+                  <p className="font-body text-[11px] text-text-muted mt-0.5">
+                    Click <span className="text-accent-primary font-mono font-medium">Edit</span> on any keybinding below to record your custom keystroke.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={resetKeybindings}
+                  className="flex items-center gap-1.5 rounded-[2px] border border-border bg-surface-2 px-2.5 py-1 font-body text-xs text-text-muted hover:text-text-primary hover:border-border/90 transition-colors cursor-pointer self-start sm:self-auto"
+                  title="Reset all shortcuts to defaults"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset Defaults</span>
+                </button>
+              </div>
+
+              {/* Search & Category Filter Bar */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
+                <input
+                  type="text"
+                  placeholder="Filter keybindings by name, key, or category..."
+                  value={shortcutSearch}
+                  onChange={(e) => setShortcutSearch(e.target.value)}
+                  className="w-full sm:w-72 rounded-[3px] border border-border bg-surface-2 px-2.5 py-1 text-xs text-text-primary placeholder:text-text-muted/60 focus:outline-none focus:border-accent-primary"
+                />
+
+                <div className="flex items-center gap-1 w-full sm:w-auto overflow-x-auto">
+                  {(['all', 'navigation', 'workbench', 'general'] as const).map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setShortcutCategory(cat)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-mono capitalize transition-colors cursor-pointer ${
+                        shortcutCategory === cat
+                          ? 'bg-accent-primary text-background font-semibold shadow-xs'
+                          : 'text-text-muted hover:text-text-body hover:bg-surface-2'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Keybindings Table */}
+              <div className="rounded-[4px] border border-border/80 bg-surface-1 divide-y divide-border/40 overflow-hidden">
+                {keybindings
+                  .filter((item) => {
+                    const matchesSearch =
+                      !shortcutSearch.trim() ||
+                      item.name.toLowerCase().includes(shortcutSearch.toLowerCase()) ||
+                      item.description.toLowerCase().includes(shortcutSearch.toLowerCase()) ||
+                      item.currentKey.toLowerCase().includes(shortcutSearch.toLowerCase())
+                    const matchesCat = shortcutCategory === 'all' || item.category === shortcutCategory
+                    return matchesSearch && matchesCat
+                  })
+                  .map((item) => {
+                    const isEditing = editingKeyId === item.id
+                    const isCustom = item.currentKey !== item.defaultKey
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 transition-colors ${
+                          isEditing
+                            ? 'bg-accent-primary/10 border-l-2 border-accent-primary'
+                            : 'hover:bg-surface-2/40'
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1 pr-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-body text-xs font-medium text-text-primary">
+                              {item.name}
+                            </span>
+                            <span className="font-mono text-[9px] px-1.5 py-0.2 rounded bg-surface-2 border border-border/60 text-text-muted uppercase">
+                              {item.category}
+                            </span>
+                            {isCustom && (
+                              <span className="font-mono text-[9px] px-1 py-0.2 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                                CUSTOM
+                              </span>
+                            )}
+                          </div>
+                          <p className="font-body text-[11px] text-text-muted mt-0.5">
+                            {item.description}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                          {isEditing ? (
+                            <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1 px-2.5 py-1 rounded border border-accent-primary bg-background shadow-xs">
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-primary opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-accent-primary"></span>
+                                </span>
+                                <span className="font-mono text-xs font-bold text-accent-primary min-w-16 text-center">
+                                  {recordedCombo ? formatKeyComboDisplay(recordedCombo) : 'Press keys...'}
+                                </span>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (recordedCombo) updateKeybinding(item.id, recordedCombo)
+                                  setEditingKeyId(null)
+                                  setRecordedCombo(null)
+                                  setConflictWarning(null)
+                                }}
+                                disabled={!recordedCombo}
+                                className="rounded px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-body text-xs font-medium flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingKeyId(null)
+                                  setRecordedCombo(null)
+                                  setConflictWarning(null)
+                                }}
+                                className="rounded px-2 py-1 bg-surface-2 hover:bg-surface-3 border border-border text-text-muted hover:text-text-primary font-body text-xs cursor-pointer transition-colors"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <kbd className="inline-flex items-center justify-center font-mono text-[11px] font-semibold text-text-primary bg-surface-2 border border-border/90 px-2 py-0.5 rounded shadow-2xs min-w-14 text-center">
+                                {formatKeyComboDisplay(item.currentKey)}
+                              </kbd>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingKeyId(item.id)
+                                  setRecordedCombo(null)
+                                  setConflictWarning(null)
+                                }}
+                                className="flex items-center gap-1 rounded-[3px] border border-border/90 bg-surface-2 hover:bg-surface-3 px-2 py-0.5 font-body text-xs text-text-body hover:text-accent-primary hover:border-accent-primary/50 transition-all cursor-pointer shadow-2xs"
+                              >
+                                <Edit2 className="w-3 h-3 text-text-muted" />
+                                <span>Edit</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {isEditing && conflictWarning && (
+                          <div className="w-full mt-1.5 flex items-center gap-1.5 text-amber-400 font-mono text-[10px] bg-amber-950/30 border border-amber-500/30 px-2 py-1 rounded">
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
+                            <span>{conflictWarning}</span>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
               </div>
             </div>
           )}
@@ -1854,63 +2301,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       </main>
 
       {/* =========================================================================
-          MODAL: Keyboard Shortcuts Reference (⌘/)
+          MODAL: Configurable Keyboard Shortcuts & Keybindings
           ========================================================================= */}
-      {shortcutsModalOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-60 bg-background/80 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setShortcutsModalOpen(false)}
-        >
-          <div
-            className="w-full max-w-md rounded-[4px] border border-border bg-surface-1 p-4 shadow-xl space-y-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-border/70 pb-2.5">
-              <h3 className="font-display text-base font-medium text-text-primary">
-                Keyboard Shortcuts
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShortcutsModalOpen(false)}
-                className="text-text-muted hover:text-text-primary transition-colors cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <div className="space-y-2 font-mono text-xs">
-              {[
-                { keys: '⌘K / Ctrl+K', desc: 'Open Command Palette' },
-                { keys: '⌘, / Ctrl+,', desc: 'Open Settings Modal' },
-                { keys: '⌘B / Ctrl+B', desc: 'Toggle Left Sidebar' },
-                { keys: '⌘N / Ctrl+N', desc: 'Create New Chat Session' },
-                { keys: '⌘E / Ctrl+E', desc: 'Toggle Split Artifact Studio' },
-                { keys: 'Esc', desc: 'Close Modals and Palettes' },
-                { keys: 'Space (Hold)', desc: 'Push-to-Talk Voice Input' },
-              ].map((s) => (
-                <div key={s.keys} className="flex items-center justify-between py-1 border-b border-border/40">
-                  <span className="text-text-body font-body text-xs">{s.desc}</span>
-                  <kbd className="bg-surface-2 border border-border px-1.5 py-0.2 rounded text-[10px] text-accent-primary">
-                    {s.keys}
-                  </kbd>
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-1.5 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShortcutsModalOpen(false)}
-                className="rounded-[2px] bg-accent-primary px-3 py-1 font-body text-xs font-semibold text-background hover:brightness-110 transition-all cursor-pointer"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <KeyboardShortcutsModal
+        isOpen={shortcutsModalOpen}
+        onClose={() => setShortcutsModalOpen(false)}
+      />
 
       {/* =========================================================================
           MODAL: Clear Temporary Cache Confirmation

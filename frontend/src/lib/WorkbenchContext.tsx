@@ -1,10 +1,26 @@
-/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ChatMessage, ArtifactData, ScopeFile, ChatSession, QueuedMessage } from './types'
 import { mockArtifactData } from './mockData'
 import { simulateModelResponse } from './simulateAi'
 import { api } from './api'
 import { useAuth } from './AuthContext'
+import {
+  type KeybindingItem,
+  DEFAULT_KEYBINDINGS,
+  loadSavedKeybindings,
+  saveKeybindingOverrides,
+  matchEventToKeybinding,
+} from './keybindings'
+import {
+  type WorkbenchSettings,
+  DEFAULT_SETTINGS,
+  loadSavedSettings,
+  saveSettings,
+  applySettingsDomEffects,
+} from './settings'
+import { playCompletionChime } from './audioChime'
+import { sendDesktopNotification } from './notifications'
 
 export interface ActiveToolsState {
   webSearch: boolean
@@ -96,7 +112,7 @@ export interface WorkbenchContextType {
     duration: string
     steps: string[]
   } | null
-  sendMessage: (text: string) => Promise<void>
+  sendMessage: (text: string, options?: { isRegenerate?: boolean; initialStatusStep?: string }) => Promise<void>
   stopStreaming: () => void
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>
 
@@ -137,23 +153,36 @@ export interface WorkbenchContextType {
   isCmdPaletteOpen: boolean
   setIsCmdPaletteOpen: React.Dispatch<React.SetStateAction<boolean>>
 
-  // Settings Modal Overlay State
+  // Settings Modal & Config State
   isSettingsOpen: boolean
   setIsSettingsOpen: React.Dispatch<React.SetStateAction<boolean>>
   openSettings: () => void
   closeSettings: () => void
   toggleSettings: () => void
+  settings: WorkbenchSettings
+  updateSetting: <K extends keyof WorkbenchSettings>(key: K, value: WorkbenchSettings[K]) => void
+  resetSettingsToDefault: () => void
 
   // Sidebar Open/Close State
   isSidebarOpen: boolean
   setIsSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>
   toggleSidebar: () => void
+
+  // Keybindings Management & Shortcuts Modal
+  keybindings: KeybindingItem[]
+  updateKeybinding: (id: string, newKey: string) => void
+  resetKeybindings: () => void
+  isShortcutsOpen: boolean
+  setIsShortcutsOpen: React.Dispatch<React.SetStateAction<boolean>>
+  openShortcuts: () => void
+  closeShortcuts: () => void
 }
 
 const WorkbenchContext = createContext<WorkbenchContextType | null>(null)
 
 export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [chatSessions, setChatSessions] = useState<ChatSession[]>(() => loadSavedSessions(user?.id))
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
@@ -179,6 +208,75 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+
+  // Settings Configuration State
+  const [settings, setSettings] = useState<WorkbenchSettings>(loadSavedSettings)
+
+  const updateSetting = useCallback(<K extends keyof WorkbenchSettings>(key: K, value: WorkbenchSettings[K]) => {
+    setSettings((prev) => {
+      const updated = { ...prev, [key]: value }
+      saveSettings(updated)
+      return updated
+    })
+  }, [])
+
+  const resetSettingsToDefault = useCallback(() => {
+    setSettings(DEFAULT_SETTINGS)
+    saveSettings(DEFAULT_SETTINGS)
+  }, [])
+
+  // Sync settings when changed from external storage event
+  useEffect(() => {
+    const handleSettingsUpdated = (e: any) => {
+      if (e.detail) {
+        setSettings(e.detail)
+      }
+    }
+    window.addEventListener('workbench_settings_updated', handleSettingsUpdated)
+    return () => window.removeEventListener('workbench_settings_updated', handleSettingsUpdated)
+  }, [])
+
+  // Apply DOM effects & Startup Behavior on boot
+  const hasHandledStartupRef = useRef(false)
+  useEffect(() => {
+    applySettingsDomEffects(settings)
+
+    if (!hasHandledStartupRef.current) {
+      hasHandledStartupRef.current = true
+      const currentPath = window.location.pathname
+      if (currentPath === '/' || currentPath === '') {
+        if (settings.startupBehavior === 'projects') {
+          navigate('/projects')
+        } else if (settings.startupBehavior === 'resume') {
+          const saved = loadSavedSessions(user?.id)
+          if (saved.length > 0 && saved[0].id) {
+            navigate(`/chat/${saved[0].id}`)
+          }
+        }
+      }
+    }
+  }, [settings, user?.id, navigate])
+
+  // Live Token Streaming Indicator Title Pulse
+  useEffect(() => {
+    if (!settings.streamingAlert) return
+    if (!isStreaming) {
+      document.title = 'Sovereign Air-Gapped Workbench'
+      return
+    }
+
+    let step = 0
+    const symbols = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+    const interval = setInterval(() => {
+      document.title = `[${symbols[step % symbols.length]} Sovereign AI Generating...] Sovereign Workbench`
+      step++
+    }, 120)
+
+    return () => {
+      clearInterval(interval)
+      document.title = 'Sovereign Air-Gapped Workbench'
+    }
+  }, [isStreaming, settings.streamingAlert])
 
   const openSettings = useCallback(() => {
     setIsSettingsOpen(true)
@@ -215,21 +313,30 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setIsSidebarOpen((prev) => !prev)
   }, [])
 
-  // Keyboard shortcut ⌘B / Ctrl+B to toggle sidebar, ⌘, / Ctrl+, for Settings
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
-        e.preventDefault()
-        toggleSidebar()
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === ',') {
-        e.preventDefault()
-        toggleSettings()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [toggleSidebar, toggleSettings])
+  // Keybinding management state
+  const [keybindings, setKeybindings] = useState<KeybindingItem[]>(loadSavedKeybindings)
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false)
+
+  const openShortcuts = useCallback(() => {
+    setIsShortcutsOpen(true)
+  }, [])
+
+  const closeShortcuts = useCallback(() => {
+    setIsShortcutsOpen(false)
+  }, [])
+
+  const updateKeybinding = useCallback((id: string, newKey: string) => {
+    setKeybindings((prev) => {
+      const updated = prev.map((k) => (k.id === id ? { ...k, currentKey: newKey } : k))
+      saveKeybindingOverrides(updated)
+      return updated
+    })
+  }, [])
+
+  const resetKeybindings = useCallback(() => {
+    setKeybindings(DEFAULT_KEYBINDINGS)
+    saveKeybindingOverrides(DEFAULT_KEYBINDINGS)
+  }, [])
 
   // Toggle tool state
   const toggleTool = useCallback((toolKey: keyof ActiveToolsState) => {
@@ -332,7 +439,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     [chatSessions]
   )
 
-  // Reset to Zero State (New Chat)
+  // Reset to Zero State (New Chat) and navigate to root with focus
   const resetToNewChat = useCallback(() => {
     const newChatId = `chat_${Date.now()}`
     setCurrentChatId(newChatId)
@@ -347,7 +454,17 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     isQueuePausedRef.current = false
     setIsStreaming(false)
     setCurrentThinking(null)
-  }, [])
+    setIsCmdPaletteOpen(false)
+    setIsSettingsOpen(false)
+    setIsShortcutsOpen(false)
+    navigate('/')
+    setTimeout(() => {
+      const inputEl = document.getElementById('workbench-chat-input') as HTMLTextAreaElement | null
+      if (inputEl) {
+        inputEl.focus()
+      }
+    }, 60)
+  }, [navigate])
 
   // Remove single message from queue
   const removeFromQueue = useCallback((id: string) => {
@@ -536,14 +653,14 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
             const payload = {
               action: 'run_agent',
-              workspace_id: 'default_workspace',
+              workspace_id: settings.defaultWorkspace || 'default_workspace',
               session_id: sessionId,
               prompt: text,
               token: token,
               auth_token: token,
               active_document_ids: scopeFiles.map((s) => s.id),
               allowed_tools: allowedToolsList,
-              temperature: 0.1,
+              temperature: settings.temperature ?? 0.1,
             }
             socket?.send(JSON.stringify(payload))
           }
@@ -712,6 +829,18 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setIsStreaming(false)
         setCurrentThinking(null)
 
+        // Acoustic chime on completion
+        if (settings.audioChimeOnCompletion) {
+          playCompletionChime()
+        }
+
+        // Desktop system notification if tab is backgrounded
+        if (settings.desktopNotifications && typeof document !== 'undefined' && document.hidden) {
+          sendDesktopNotification('Sovereign Agent Reasoning Complete', {
+            body: 'Autonomous graph synthesis and response are ready in Sovereign Workbench.',
+          })
+        }
+
         // Process next queued message sequentially if not paused for HITL
         if (!isQueuePausedRef.current && queuedMessagesRef.current.length > 0) {
           const nextItem = queuedMessagesRef.current[0]
@@ -723,7 +852,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       }
     },
-    [activeTools, currentChatId, scopeFiles, chatSessions, user?.id]
+    [activeTools, currentChatId, scopeFiles, chatSessions, user?.id, settings]
   )
 
   // Manually resume queue if held for HITL or user intervention
@@ -740,18 +869,77 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [sendMessage])
 
-  // Listen for global ⌘K / Ctrl+K keyboard shortcut
+  // Global Keybindings Listener using customizable KeybindingItem configs
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        setIsCmdPaletteOpen((prev) => !prev)
+      // If user is typing in an editable field, allow normal typing unless Cmd/Ctrl/Alt modifier is held
+      const target = e.target as HTMLElement | null
+      const isInputFocused =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+
+      for (const item of keybindings) {
+        if (matchEventToKeybinding(e, item.currentKey)) {
+          // If keycombo has no modifier (like Escape), and user is inside an input, only trigger if it's close_modals
+          if (isInputFocused && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            if (item.id !== 'close_modals') {
+              continue
+            }
+          }
+
+          e.preventDefault()
+          e.stopPropagation()
+
+          switch (item.id) {
+            case 'open_palette':
+              setIsCmdPaletteOpen((prev) => !prev)
+              break
+            case 'toggle_settings':
+              setIsSettingsOpen((prev) => !prev)
+              break
+            case 'toggle_sidebar':
+              setIsSidebarOpen((prev) => !prev)
+              break
+            case 'new_chat':
+              resetToNewChat()
+              break
+            case 'toggle_artifact':
+              toggleArtifactPanel()
+              break
+            case 'open_shortcuts':
+              setIsShortcutsOpen((prev) => !prev)
+              break
+            case 'close_modals':
+              if (isShortcutsOpen) setIsShortcutsOpen(false)
+              else if (isSettingsOpen) setIsSettingsOpen(false)
+              else if (isCmdPaletteOpen) setIsCmdPaletteOpen(false)
+              else if (isArtifactOpen) closeArtifact()
+              else if (isInputFocused && target) {
+                target.blur()
+              }
+              break
+            default:
+              break
+          }
+          break
+        }
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [
+    keybindings,
+    isShortcutsOpen,
+    isSettingsOpen,
+    isCmdPaletteOpen,
+    isArtifactOpen,
+    resetToNewChat,
+    toggleArtifactPanel,
+    closeArtifact,
+  ])
 
   return (
     <WorkbenchContext.Provider
@@ -792,9 +980,19 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         openSettings,
         closeSettings,
         toggleSettings,
+        settings,
+        updateSetting,
+        resetSettingsToDefault,
         isSidebarOpen,
         setIsSidebarOpen,
         toggleSidebar,
+        keybindings,
+        updateKeybinding,
+        resetKeybindings,
+        isShortcutsOpen,
+        setIsShortcutsOpen,
+        openShortcuts,
+        closeShortcuts,
       }}
     >
       {children}

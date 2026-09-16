@@ -834,6 +834,7 @@ export const InputBar: React.FC<InputBarProps> = ({
         {/* Text Input Area */}
         <div className="px-4 py-3">
           <textarea
+            id="workbench-chat-input"
             ref={textareaRef}
             rows={1}
             value={inputText}

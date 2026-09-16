@@ -102,9 +102,21 @@ Both metrics indicate standard nominal performance.
     assert charts[0]["type"] == "line"
     assert charts[1]["type"] == "pie"
 
+def test_stimulative_directive_extraction():
+    stimulative_text = """Here is the Pressure vs Temperature chart as a stimulative interactive graph:
+
+:::stimulative { "title": "Pressure vs Temperature for HP-BV-401", "description": "Maximum Allowable Working Pressure (MAWP) for HP-BV-401 as a function of operating temperature", "xAxisLabel": "Temperature (ºC)", "yAxisLabel": "Pressure (bar)", "series": [ { "key": "MAWP", "name": "Maximum Allowable Working Pressure", "color": "#D97A3F" }, { "key": "Effective MAWP", "name": "Effective Maximum Allowable Working Pressure", "color": "#10B981" } ], "data": [ { "temperature": 250, "MAWP": 140.0, "Effective MAWP": 120.0 }, { "temperature": 300, "MAWP": 160.0, "Effective MAWP": 140.0 }, { "temperature": 350, "MAWP": 160.0, "Effective MAWP": 140.0 }, { "temperature": 400, "MAWP": 140.0, "Effective MAWP": 120.0 }, { "temperature": 450, "MAWP": 120.0, "Effective MAWP": 100.0 } ], "interactive": true } :::
+"""
+    charts = extract_chart_specs(stimulative_text)
+    assert len(charts) == 1, f"Expected 1 chart from :::stimulative, got {len(charts)}"
+    assert charts[0]["title"] == "Pressure vs Temperature for HP-BV-401"
+    assert len(charts[0]["data"]) == 5
+    assert len(charts[0]["series"]) == 2
+
 if __name__ == "__main__":
     test_extract_chart_specs()
     test_create_chart_artifact()
     test_supervisor_routes_analytics()
     test_multiple_charts_extraction()
+    test_stimulative_directive_extraction()
     print("ALL ANALYTICS TESTS PASSED!")

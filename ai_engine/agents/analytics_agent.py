@@ -57,7 +57,7 @@ def synthesize_chart_from_code_or_text(text: str) -> Optional[Dict[str, Any]]:
     Fallback parser: If the model output contains Python/matplotlib lists or plotting code
     instead of the :::chart block, extract the numeric data points and synthesize a valid ChartSpec.
     """
-    if not text or ":::chart" in text:
+    if not text or any(k in text.lower() for k in [":::chart", ":::stimulative", ":::stimulate", ":::simulation", ":::simulate", ":::graph", ":::plot", ":::interactive", ":::visualization", ":::analytics"]):
         return None
 
     # Search for list assignments like: temperature = [350, 380, 420, 460, 500]
@@ -128,31 +128,39 @@ def synthesize_chart_from_code_or_text(text: str) -> Optional[Dict[str, Any]]:
 
 def extract_chart_specs(text: str) -> List[Dict[str, Any]]:
     """
-    Extract and validate :::chart ... ::: blocks from response text.
+    Extract and validate :::chart ... ::: (or aliased :::stimulative / :::simulation) blocks from response text.
     If no block is present but matplotlib/code lists exist, automatically synthesizes a chart spec.
     """
     if not text:
         return []
 
-    matches = re.findall(r":::chart\s*([\s\S]*?):::", text)
+    matches = re.findall(r":::(?:chart|graph|plot|visualization|stimulative|stimulate|simulation|simulate|interactive|analytics)\s*([\s\S]*?):::", text, re.IGNORECASE)
     charts = []
     for raw_json in matches:
         raw_json_clean = raw_json.strip()
+        parsed = None
         try:
             parsed = json.loads(raw_json_clean)
-            if isinstance(parsed, dict) and "data" in parsed:
-                charts.append(parsed)
-        except Exception as e:
-            # Attempt to fix common trailing commas or minor JSON quirks
+        except Exception:
+            # Attempt to fix common trailing commas, single quotes, or minor JSON quirks
             fixed_json = re.sub(r",\s*([}\]])", r"\1", raw_json_clean)
+            fixed_json = re.sub(r"'\s*:", r'":', fixed_json)
+            fixed_json = re.sub(r":\s*'([^']*)'", r':"\1"', fixed_json)
             try:
                 parsed = json.loads(fixed_json)
-                if isinstance(parsed, dict) and "data" in parsed:
-                    charts.append(parsed)
-            except Exception:
+            except Exception as e:
                 logger.warning(f"Failed to parse chart spec JSON: {e}")
 
-    # If no :::chart block was found, attempt fallback synthesis
+        if isinstance(parsed, dict):
+            if "data" in parsed and isinstance(parsed["data"], list):
+                charts.append(parsed)
+            elif "data" in parsed and isinstance(parsed["data"], dict):
+                parsed["data"] = [parsed["data"]]
+                charts.append(parsed)
+            elif "series" in parsed:
+                charts.append(parsed)
+
+    # If no chart block was found, attempt fallback synthesis
     if not charts:
         synth = synthesize_chart_from_code_or_text(text)
         if synth:

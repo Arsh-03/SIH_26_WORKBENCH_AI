@@ -224,12 +224,12 @@ interface ContentPart {
 }
 
 /**
- * Splits text into markdown text segments and dynamic :::chart, :::infographic, :::economics, :::physics, :::output, and :::pid blocks.
+ * Splits text into markdown text segments and dynamic :::chart,  :::infographic, :::economics, :::physics, :::output, :::pid, and aliased :::stimulative blocks.
  */
 const parseContentWithCharts = (text: string): ContentPart[] => {
   if (!text) return [{ type: 'text', content: '' }]
 
-  const regex = /:::(chart|infographic|economics|physics|output|pid|analysis_progress)\s*([\s\S]*?):::/g
+  const regex = /:::(chart|infographic|economics|physics|output|pid|stimulative|stimulate|simulation|simulate|interactive|graph|plot|visualization|analytics|asme)\s*([\s\S]*?):::/gi
   const parts: ContentPart[] = []
   let lastIndex = 0
   let match: RegExpExecArray | null
@@ -253,7 +253,10 @@ const parseContentWithCharts = (text: string): ContentPart[] => {
         parsed = JSON.parse(rawJson)
       } catch {
         try {
-          const fixed = rawJson.replace(/,\s*([}\]])/g, '$1')
+          const fixed = rawJson
+            .replace(/,\s*([}\]])/g, '$1')
+            .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2":')
+            .replace(/:\s*'([^']*)'/g, ':"$1"')
           parsed = JSON.parse(fixed)
         } catch {
           parsed = null
@@ -284,8 +287,37 @@ const parseContentWithCharts = (text: string): ContentPart[] => {
           parts.push({ type: 'economics', economicsSpec: parsed })
         } else if (blockType === 'physics') {
           parts.push({ type: 'physics', physicsSpec: parsed })
-        } else if (blockType === 'pid') {
+        } else if (blockType === 'pid' || (parsed.nodes && parsed.pipes) || (parsed.equipment && parsed.nodes)) {
           parts.push({ type: 'pid', pidSpec: parsed })
+        } else if (
+          blockType === 'physics' ||
+          blockType === 'asme' ||
+          parsed.formulaLatex ||
+          parsed.marginOfSafety !== undefined ||
+          (parsed.inputs && parsed.results && (parsed.standard || parsed.safetyAssessment))
+        ) {
+          parts.push({ type: 'physics', physicsSpec: parsed })
+        } else if (
+          blockType === 'economics' ||
+          parsed.headlineMetric ||
+          parsed.costBreakdown ||
+          parsed.annualizedCapEx ||
+          parsed.opexBreakdown
+        ) {
+          parts.push({ type: 'economics', economicsSpec: parsed })
+        } else if (Array.isArray(parsed.data)) {
+          parts.push({ type: 'chart', chartSpec: parsed })
+        } else if (parsed.series && typeof parsed.data === 'object') {
+          const dataArray = Array.isArray(parsed.data) ? parsed.data : [parsed.data]
+          parts.push({ type: 'chart', chartSpec: { ...parsed, data: dataArray } })
+        } else if (['chart', 'stimulative', 'stimulate', 'simulation', 'simulate', 'interactive', 'graph', 'plot', 'visualization', 'analytics'].includes(blockType)) {
+          if (parsed.data && Array.isArray(parsed.data)) {
+            parts.push({ type: 'chart', chartSpec: parsed })
+          } else if (parsed.inputs && parsed.results) {
+            parts.push({ type: 'physics', physicsSpec: parsed })
+          } else {
+            parts.push({ type: 'text', content: '```json\n' + rawJson + '\n```' })
+          }
         } else {
           parts.push({ type: 'text', content: '```json\n' + rawJson + '\n```' })
         }
@@ -420,12 +452,12 @@ const CitationBadgeAnchor: React.FC<CitationBadgeAnchorProps> = ({
   const displayLoc = sec
     ? `Section ${sec}`
     : textRefSec
-    ? `Section ${textRefSec}`
-    : page
-    ? `Page ${page}`
-    : matchedCitation?.page_number
-    ? `Page ${matchedCitation.page_number}`
-    : 'Grounding Spec'
+      ? `Section ${textRefSec}`
+      : page
+        ? `Page ${page}`
+        : matchedCitation?.page_number
+          ? `Page ${matchedCitation.page_number}`
+          : 'Grounding Spec'
 
   const isWeb = docName.toLowerCase().includes('wikipedia') || docName.toLowerCase().includes('http')
   const isNumericBadge = matchedIndex >= 0 || /^\[?\d+\]?$/.test(childStr) || /[①-⑩]/.test(childStr)
@@ -640,11 +672,10 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
                 type="button"
                 onClick={handleCopyPrompt}
                 title={isPromptCopied ? 'Copied prompt!' : 'Copy prompt'}
-                className={`flex items-center gap-1 font-mono text-[10px] p-1 rounded transition-all cursor-pointer ${
-                  isPromptCopied
-                    ? 'text-accent-primary bg-accent-primary/15 opacity-100'
-                    : 'text-text-muted hover:text-text-primary hover:bg-surface-2 opacity-40 group-hover:opacity-100'
-                }`}
+                className={`flex items-center gap-1 font-mono text-[10px] p-1 rounded transition-all cursor-pointer ${isPromptCopied
+                  ? 'text-accent-primary bg-accent-primary/15 opacity-100'
+                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2 opacity-40 group-hover:opacity-100'
+                  }`}
               >
                 {isPromptCopied ? (
                   <>
@@ -843,8 +874,8 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
                             step.status === 'completed'
                               ? 'text-text-primary'
                               : step.status === 'in_progress'
-                              ? 'text-accent-primary font-semibold'
-                              : 'text-text-muted'
+                                ? 'text-accent-primary font-semibold'
+                                : 'text-text-muted'
                           }
                         >
                           {step.name}
@@ -1115,11 +1146,10 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
           onClick={handleCopyAiContent}
           title={isAiCopied ? 'Copied response!' : 'Copy response'}
           aria-label="Copy response"
-          className={`flex items-center justify-center p-1.5 rounded-[4px] transition-all cursor-pointer ${
-            isAiCopied
-              ? 'text-accent-primary bg-accent-primary/15 border border-accent-primary/40'
-              : 'text-text-muted hover:text-text-primary hover:bg-surface-2 border border-transparent hover:border-border/60'
-          }`}
+          className={`flex items-center justify-center p-1.5 rounded-[4px] transition-all cursor-pointer ${isAiCopied
+            ? 'text-accent-primary bg-accent-primary/15 border border-accent-primary/40'
+            : 'text-text-muted hover:text-text-primary hover:bg-surface-2 border border-transparent hover:border-border/60'
+            }`}
         >
           {isAiCopied ? (
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-accent-primary">
@@ -1175,17 +1205,16 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
                       prev.includes(oIdx) ? prev.filter((i) => i !== oIdx) : [...prev, oIdx]
                     )
                   }}
-                  className={`group flex items-center justify-between gap-3 rounded-[3px] border px-3 py-2 text-left transition-all cursor-pointer shadow-2xs ${
-                    isSelected
-                      ? 'border-accent-primary bg-accent-primary/15'
-                      : 'border-border/80 bg-surface-1/90 hover:border-accent-primary/60 hover:bg-surface-2'
-                  }`}
+                  className={`group flex items-center justify-between gap-3 rounded-[3px] border px-3 py-2 text-left transition-all cursor-pointer shadow-2xs ${isSelected
+                    ? 'border-accent-primary bg-accent-primary/15'
+                    : 'border-border/80 bg-surface-1/90 hover:border-accent-primary/60 hover:bg-surface-2'
+                    }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <input
                       type="checkbox"
                       checked={isSelected}
-                      onChange={() => {}} // handled by row onClick
+                      onChange={() => { }} // handled by row onClick
                       className="accent-[#FF6B00] rounded cursor-pointer h-3.5 w-3.5 shrink-0"
                     />
                     <span className="font-mono text-[11px] text-accent-primary font-bold shrink-0 bg-surface-2 px-1.5 py-0.5 rounded-[2px] border border-border">
