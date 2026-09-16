@@ -1,38 +1,38 @@
-import React, { useState, useEffect } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
-import { LogOut } from 'lucide-react'
+import React, { useState, useEffect } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
+import { LogOut } from "lucide-react";
 import type {
   NavItem,
   PinnedProject,
   PinnedChat,
   RecentChat,
   UserProfile,
-} from '../../lib/types'
+} from "../../lib/types";
 import {
   mockNavItems,
   mockPinnedProjects,
   mockPinnedChats,
   mockUserProfile,
-} from '../../lib/mockData'
-import { useWorkbench } from '../../lib/WorkbenchContext'
-import { useAuth } from '../../lib/AuthContext'
-import { api, type SystemHealth, type HardwareTelemetry } from '../../lib/api'
-import { getKeybindingDisplay } from '../../lib/keybindings'
-import { AmberUnderline } from './AmberUnderline'
+} from "../../lib/mockData";
+import { useWorkbench } from "../../lib/WorkbenchContext";
+import { useAuth } from "../../lib/AuthContext";
+import { api, type SystemHealth, type HardwareTelemetry } from "../../lib/api";
+import { getKeybindingDisplay } from "../../lib/keybindings";
+import { AmberUnderline } from "./AmberUnderline";
 
 export interface SidebarProps {
-  pinnedProjects?: PinnedProject[]
-  pinnedChats?: PinnedChat[]
-  recentChats?: RecentChat[]
-  activeNav?: string
-  userProfile?: UserProfile
-  onOpenCmdPalette?: () => void
-  onNewChat?: () => void
-  className?: string
+  pinnedProjects?: PinnedProject[];
+  pinnedChats?: PinnedChat[];
+  recentChats?: RecentChat[];
+  activeNav?: string;
+  userProfile?: UserProfile;
+  onOpenCmdPalette?: () => void;
+  onNewChat?: () => void;
+  className?: string;
 }
 
-const AmberUnderlineWrapper = AmberUnderline
+const AmberUnderlineWrapper = AmberUnderline;
 
 /**
  * Left Sidebar Component
@@ -51,152 +51,188 @@ export const Sidebar: React.FC<SidebarProps> = ({
   userProfile = mockUserProfile,
   onOpenCmdPalette,
   onNewChat,
-  className = '',
+  className = "",
 }) => {
-  const location = useLocation()
-  const navigate = useNavigate()
-  const { user: authUser, logout } = useAuth()
-  const { chatSessions, loadChatSession, isSidebarOpen, toggleSidebar, togglePinChat, openSettings, isSettingsOpen, keybindings } = useWorkbench()
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { user: authUser, logout } = useAuth();
+  const {
+    chatSessions,
+    loadChatSession,
+    isSidebarOpen,
+    toggleSidebar,
+    togglePinChat,
+    openSettings,
+    isSettingsOpen,
+    keybindings,
+  } = useWorkbench();
 
-  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null)
-  const [hardwareTelemetry, setHardwareTelemetry] = useState<HardwareTelemetry | null>(null)
-  const [isExportingBundle, setIsExportingBundle] = useState(false)
-  const [bundleSuccess, setBundleSuccess] = useState(false)
-  const [showStatusHover, setShowStatusHover] = useState(false)
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
+  const [hardwareTelemetry, setHardwareTelemetry] =
+    useState<HardwareTelemetry | null>(null);
+  const [isExportingBundle, setIsExportingBundle] = useState(false);
+  const [bundleSuccess, setBundleSuccess] = useState(false);
+  const [showStatusHover, setShowStatusHover] = useState(false);
 
-  const activeUserProfile = authUser || userProfile
-  const userInitial = (activeUserProfile?.avatarLetter || activeUserProfile?.name?.trim().charAt(0) || activeUserProfile?.username?.trim().charAt(0) || 'M').toUpperCase()
+  const activeUserProfile = authUser || userProfile;
+  const userInitial = (
+    activeUserProfile?.avatarLetter ||
+    activeUserProfile?.name?.trim().charAt(0) ||
+    activeUserProfile?.username?.trim().charAt(0) ||
+    "M"
+  ).toUpperCase();
 
   // Poll telemetry every 5 seconds
   useEffect(() => {
-    let mounted = true
+    let mounted = true;
     const fetchTelemetry = () => {
-      api.getHardwareTelemetry()
+      api
+        .getHardwareTelemetry()
         .then((data) => {
-          if (mounted) setHardwareTelemetry(data)
+          if (mounted) setHardwareTelemetry(data);
         })
-        .catch(() => {})
+        .catch(() => {});
 
-      api.getSystemHealth()
+      api
+        .getSystemHealth()
         .then((data) => {
-          if (mounted) setSystemHealth(data)
+          if (mounted) setSystemHealth(data);
         })
         .catch(() => {
           if (mounted) {
             setSystemHealth({
               ollama_running: false,
               available_models: [],
-            })
+            });
           }
-        })
-    }
+        });
+    };
 
-    fetchTelemetry()
-    const interval = setInterval(fetchTelemetry, 4000)
+    fetchTelemetry();
+    const interval = setInterval(fetchTelemetry, 4000);
 
     return () => {
-      mounted = false
-      clearInterval(interval)
-    }
-  }, [])
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const refreshHealth = () => {
-    api.getHardwareTelemetry()
+    api
+      .getHardwareTelemetry()
       .then((data) => setHardwareTelemetry(data))
-      .catch(() => {})
-    api.getSystemHealth()
+      .catch(() => {});
+    api
+      .getSystemHealth()
       .then((data) => setSystemHealth(data))
       .catch(() => {
         setSystemHealth({
           ollama_running: false,
           available_models: [],
-        })
-      })
-  }
+        });
+      });
+  };
 
   const handleDownloadSessionBundle = async () => {
-    setIsExportingBundle(true)
+    setIsExportingBundle(true);
     try {
-      const activeSessionId = chatSessions[0]?.id || 'sovereign_session'
-      await api.downloadSessionBundle(activeSessionId)
-      setBundleSuccess(true)
-      setTimeout(() => setBundleSuccess(false), 2500)
+      const activeSessionId = chatSessions[0]?.id || "sovereign_session";
+      await api.downloadSessionBundle(activeSessionId);
+      setBundleSuccess(true);
+      setTimeout(() => setBundleSuccess(false), 2500);
     } catch (err) {
-      console.error('Failed to export session bundle:', err)
+      console.error("Failed to export session bundle:", err);
     } finally {
-      setIsExportingBundle(false)
+      setIsExportingBundle(false);
     }
-  }
+  };
 
   const handleLogout = () => {
-    logout()
-    navigate('/login')
-  }
+    logout();
+    navigate("/login");
+  };
 
   // Dynamic pinned and recent chats from real persistent SQLite sessions
-  const dynamicPinnedChats = chatSessions.length > 0
-    ? chatSessions.filter((s) => s.isPinned).map((s) => ({
-        id: s.id,
-        title: s.title,
-        path: `/chat/${s.id}`,
-        isPinned: true,
-      }))
-    : (pinnedChats || []).map((p) => ({ ...p, isPinned: true }))
+  const dynamicPinnedChats =
+    chatSessions.length > 0
+      ? chatSessions
+          .filter((s) => s.isPinned)
+          .map((s) => ({
+            id: s.id,
+            title: s.title,
+            path: `/chat/${s.id}`,
+            isPinned: true,
+          }))
+      : (pinnedChats || []).map((p) => ({ ...p, isPinned: true }));
 
-  const dynamicRecentChats = chatSessions.length > 0
-    ? chatSessions.filter((s) => !s.isPinned).slice(0, 8).map((s) => ({
-        id: s.id,
-        title: s.title,
-        path: `/chat/${s.id}`,
-        isPinned: false,
-      }))
-    : (recentChats || [])
-
+  const dynamicRecentChats =
+    chatSessions.length > 0
+      ? chatSessions
+          .filter((s) => !s.isPinned)
+          .slice(0, 8)
+          .map((s) => ({
+            id: s.id,
+            title: s.title,
+            path: `/chat/${s.id}`,
+            isPinned: false,
+          }))
+      : recentChats || [];
 
   // Determine active section if not provided as prop
-  const currentPath = location?.pathname ?? '/chat'
+  const currentPath = location?.pathname ?? "/chat";
   const resolvedActiveNav =
     activeNav ??
-    (currentPath.startsWith('/chats')
-      ? 'chats'
-      : currentPath.startsWith('/projects')
-        ? 'projects'
-        : currentPath.startsWith('/library')
-          ? 'library'
-          : currentPath.startsWith('/company-docs')
-            ? 'company-docs'
-            : currentPath.startsWith('/settings')
-              ? 'settings'
-              : '')
+    (currentPath.startsWith("/chats")
+      ? "chats"
+      : currentPath.startsWith("/projects")
+        ? "projects"
+        : currentPath.startsWith("/library")
+          ? "library"
+          : currentPath.startsWith("/company-docs")
+            ? "company-docs"
+            : currentPath.startsWith("/settings")
+              ? "settings"
+              : "");
 
-  const isOnline = Boolean(systemHealth?.ollama_running)
-  const vramTotal = systemHealth?.gpu_telemetry?.total_vram_mb || 0
-  const vramAlloc = systemHealth?.gpu_telemetry?.allocated_vram_mb || 0
-  const deviceName = systemHealth?.gpu_telemetry?.device_name || 'Host CPU / RAM Memory Enclave'
-  const availableModels = systemHealth?.available_models || []
+  const isOnline = Boolean(systemHealth?.ollama_running);
+  const vramTotal = systemHealth?.gpu_telemetry?.total_vram_mb || 0;
+  const vramAlloc = systemHealth?.gpu_telemetry?.allocated_vram_mb || 0;
+  const deviceName =
+    systemHealth?.gpu_telemetry?.device_name || "Host CPU / RAM Memory Enclave";
+  const availableModels = systemHealth?.available_models || [];
 
   const renderStatusHUD = (isCompact: boolean) => {
-    const gpuName = hardwareTelemetry?.gpu?.gpu_name || deviceName
-    const gpuTemp = hardwareTelemetry?.gpu?.temperature_c || 45
-    const vramUsed = hardwareTelemetry?.gpu?.vram_used_mb || vramAlloc
-    const vramTot = hardwareTelemetry?.gpu?.vram_total_mb || vramTotal
-    const vramPct = vramTot > 0 ? Math.min(100, Math.round((vramUsed / vramTot) * 100)) : 0
-    const ramUsed = hardwareTelemetry?.ram_used_gb ?? 8.4
-    const ramTot = hardwareTelemetry?.ram_total_gb ?? 32.0
-    const ramPct = hardwareTelemetry?.ram_percent ?? Math.round((ramUsed / (ramTot || 1)) * 100)
-    const cpuPct = hardwareTelemetry?.cpu_percent ?? 14.2
-    const tps = hardwareTelemetry?.tokens_per_second ?? (isOnline ? 42.5 : 0)
+    const gpuName = hardwareTelemetry?.gpu?.gpu_name || deviceName;
+    const gpuTemp = hardwareTelemetry?.gpu?.temperature_c || 45;
+    const vramUsed = hardwareTelemetry?.gpu?.vram_used_mb || vramAlloc;
+    const vramTot = hardwareTelemetry?.gpu?.vram_total_mb || vramTotal;
+    const vramPct =
+      vramTot > 0 ? Math.min(100, Math.round((vramUsed / vramTot) * 100)) : 0;
+    const ramUsed = hardwareTelemetry?.ram_used_gb ?? 8.4;
+    const ramTot = hardwareTelemetry?.ram_total_gb ?? 32.0;
+    const ramPct =
+      hardwareTelemetry?.ram_percent ??
+      Math.round((ramUsed / (ramTot || 1)) * 100);
+    const cpuPct = hardwareTelemetry?.cpu_percent ?? 14.2;
+    const tps = hardwareTelemetry?.tokens_per_second ?? (isOnline ? 42.5 : 0);
 
     return (
       <AnimatePresence>
         {showStatusHover && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: isCompact ? 0 : 4, x: isCompact ? 6 : 0 }}
+            initial={{
+              opacity: 0,
+              scale: 0.95,
+              y: isCompact ? 0 : 4,
+              x: isCompact ? 6 : 0,
+            }}
             animate={{ opacity: 1, scale: 1, y: 0, x: 0 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
             className={`absolute z-50 rounded-[6px] border border-border bg-[#14100D] p-3 shadow-2xl font-mono text-xs text-text-primary select-none ${
-              isCompact ? 'left-14 bottom-2 w-[275px]' : 'left-2 right-2 bottom-16 w-auto'
+              isCompact
+                ? "left-14 bottom-2 w-[275px]"
+                : "left-2 right-2 bottom-16 w-auto"
             }`}
             onMouseEnter={() => setShowStatusHover(true)}
             onMouseLeave={() => setShowStatusHover(false)}
@@ -205,19 +241,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex items-center justify-between border-b border-border/80 pb-2 mb-2">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="relative flex h-2 w-2 shrink-0">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'} opacity-75`} />
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  <span
+                    className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? "bg-emerald-400" : "bg-amber-400"} opacity-75`}
+                  />
+                  <span
+                    className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? "bg-emerald-500" : "bg-amber-500"}`}
+                  />
                 </span>
                 <span className="font-semibold text-[10px] uppercase tracking-wider text-text-primary truncate">
-                  {isOnline ? 'Sovereign Enclave Active' : 'Ollama Disconnected'}
+                  {isOnline
+                    ? "Sovereign Enclave Active"
+                    : "Ollama Disconnected"}
                 </span>
               </div>
-              <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 border ${
-                isOnline
-                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                  : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-              }`}>
-                {isOnline ? 'AIR-GAPPED' : 'OFFLINE'}
+              <span
+                className={`text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 border ${
+                  isOnline
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                    : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                }`}
+              >
+                {isOnline ? "AIR-GAPPED" : "OFFLINE"}
               </span>
             </div>
 
@@ -228,7 +272,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <span className="font-semibold text-accent-primary uppercase tracking-wider flex items-center gap-1">
                     <span>⚡</span> GPU Acceleration
                   </span>
-                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${gpuTemp > 75 ? 'bg-red-500/20 text-red-400' : gpuTemp > 60 ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                  <span
+                    className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${gpuTemp > 75 ? "bg-red-500/20 text-red-400" : gpuTemp > 60 ? "bg-amber-500/20 text-amber-400" : "bg-emerald-500/20 text-emerald-400"}`}
+                  >
                     {gpuTemp}°C
                   </span>
                 </div>
@@ -240,7 +286,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <div className="flex justify-between text-[9.5px] text-text-muted font-mono">
                     <span>VRAM Allocated</span>
                     <span className="text-text-primary font-bold">
-                      {vramTot > 0 ? `${(vramUsed / 1024).toFixed(1)} / ${(vramTot / 1024).toFixed(1)} GB (${vramPct}%)` : 'CPU Subprocess Enclave'}
+                      {vramTot > 0
+                        ? `${(vramUsed / 1024).toFixed(1)} / ${(vramTot / 1024).toFixed(1)} GB (${vramPct}%)`
+                        : "CPU Subprocess Enclave"}
                     </span>
                   </div>
                   {vramTot > 0 && (
@@ -257,8 +305,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {/* Host CPU, RAM & Stream Throughput */}
               <div className="rounded-[4px] border border-border/60 bg-[#1D1712] p-2 space-y-1">
                 <div className="flex items-center justify-between text-[10px] text-text-muted uppercase">
-                  <span className="font-semibold text-text-body">Host Memory &amp; CPU</span>
-                  <span className="text-accent-primary font-bold text-[9px]">{tps} TPS</span>
+                  <span className="font-semibold text-text-body">
+                    Host Memory &amp; CPU
+                  </span>
+                  <span className="text-accent-primary font-bold text-[9px]">
+                    {tps} TPS
+                  </span>
                 </div>
                 {/* RAM Bar */}
                 <div className="space-y-0.5">
@@ -277,7 +329,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                 <div className="flex justify-between text-[9.5px] text-text-muted font-mono pt-0.5">
                   <span>Host CPU Utilization</span>
-                  <span className="text-text-primary font-semibold">{cpuPct}%</span>
+                  <span className="text-text-primary font-semibold">
+                    {cpuPct}%
+                  </span>
                 </div>
               </div>
 
@@ -285,10 +339,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="rounded-[4px] border border-border/60 bg-[#1D1712] p-2 space-y-1">
                 <div className="flex items-center justify-between text-[10px] text-text-muted uppercase">
                   <span className="font-semibold text-text-muted">
-                    {isOnline ? `Active Models (${availableModels.length})` : 'Models Offline (0)'}
+                    {isOnline
+                      ? `Active Models (${availableModels.length})`
+                      : "Models Offline (0)"}
                   </span>
-                  <span className={`font-bold text-[9px] ${isOnline ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {isOnline ? 'ENCLAVE' : 'DISCONNECTED'}
+                  <span
+                    className={`font-bold text-[9px] ${isOnline ? "text-emerald-400" : "text-amber-400"}`}
+                  >
+                    {isOnline ? "ENCLAVE" : "DISCONNECTED"}
                   </span>
                 </div>
                 {availableModels.length > 0 ? (
@@ -304,7 +362,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 ) : (
                   <div className="text-[10px] text-text-muted italic py-1">
-                    {isOnline ? 'No models currently loaded in Ollama.' : 'Ollama server is offline. Local fallback active.'}
+                    {isOnline
+                      ? "No models currently loaded in Ollama."
+                      : "Ollama server is offline. Local fallback active."}
                   </div>
                 )}
               </div>
@@ -313,7 +373,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="space-y-1.5 pt-1 border-t border-border/40">
                 <div className="flex items-center justify-between text-[9px] text-text-muted font-mono">
                   <span>Network Egress:</span>
-                  <span className="text-green-400 font-bold">0 Bytes (Active Guard)</span>
+                  <span className="text-green-400 font-bold">
+                    0 Bytes (Active Guard)
+                  </span>
                 </div>
 
                 <button
@@ -324,14 +386,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 >
                   {isExportingBundle ? (
                     <>
-                      <svg className="animate-spin h-3 w-3 text-accent-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      <svg
+                        className="animate-spin h-3 w-3 text-accent-primary"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
                       </svg>
                       <span>Packaging Archive...</span>
                     </>
                   ) : bundleSuccess ? (
-                    <span className="text-green-400 font-bold">Bundle Downloaded ✓</span>
+                    <span className="text-green-400 font-bold">
+                      Bundle Downloaded ✓
+                    </span>
                   ) : (
                     <>
                       <span>📦</span>
@@ -344,10 +424,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
-    )
-  }
-
-
+    );
+  };
 
   if (!isSidebarOpen) {
     /* =========================================================================
@@ -363,7 +441,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={toggleSidebar}
-            title={`Expand Sidebar (${getKeybindingDisplay(keybindings, 'toggle_sidebar', '⌘B')})`}
+            title={`Expand Sidebar (${getKeybindingDisplay(keybindings, "toggle_sidebar", "⌘B")})`}
             aria-label="Expand Sidebar"
             className="group flex flex-col items-center justify-center p-1.5 rounded-[4px] hover:bg-surface-2 transition-colors cursor-pointer"
           >
@@ -382,7 +460,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={onNewChat}
-            title={`New Chat (${getKeybindingDisplay(keybindings, 'new_chat', '⌘N')})`}
+            title={`New Chat (${getKeybindingDisplay(keybindings, "new_chat", "⌘N")})`}
             aria-label="New Chat"
             className="group relative flex h-8 w-8 items-center justify-center rounded-[4px] border border-accent-primary/40 bg-accent-primary/10 text-accent-primary transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer shadow-xs motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] hover:bg-accent-primary/25 hover:border-accent-primary hover:shadow-[0_0_12px_rgba(217,122,63,0.3)] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06]"
           >
@@ -395,12 +473,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={onOpenCmdPalette}
-            title={`Search Chats (${getKeybindingDisplay(keybindings, 'open_palette', '⌘K')})`}
+            title={`Search Chats (${getKeybindingDisplay(keybindings, "open_palette", "⌘K")})`}
             aria-label="Search Chats"
             className="group relative flex h-8 w-8 items-center justify-center rounded-[4px] border border-border/80 bg-surface-2/60 text-text-muted transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] hover:text-text-primary hover:border-accent-primary/50 hover:bg-surface-2 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06]"
           >
-            <svg className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            <svg
+              className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
             </svg>
           </button>
 
@@ -413,13 +501,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
               to="/chats"
               title={`Chats (${chatSessions.length})`}
               className={`group relative flex h-8 w-8 items-center justify-center rounded-[4px] transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06] ${
-                resolvedActiveNav === 'chats'
-                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]'
-                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/90 hover:border-accent-primary/40 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] border border-transparent'
+                resolvedActiveNav === "chats"
+                  ? "bg-accent-primary/15 text-accent-primary border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]"
+                  : "text-text-muted hover:text-text-primary hover:bg-surface-2/90 hover:border-accent-primary/40 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] border border-transparent"
               }`}
             >
-              <svg className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              <svg
+                className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                />
               </svg>
             </Link>
 
@@ -428,13 +526,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
               to="/projects"
               title="Projects (05)"
               className={`group relative flex h-8 w-8 items-center justify-center rounded-[4px] transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06] ${
-                resolvedActiveNav === 'projects'
-                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]'
-                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/90 hover:border-accent-primary/40 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] border border-transparent'
+                resolvedActiveNav === "projects"
+                  ? "bg-accent-primary/15 text-accent-primary border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]"
+                  : "text-text-muted hover:text-text-primary hover:bg-surface-2/90 hover:border-accent-primary/40 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] border border-transparent"
               }`}
             >
-              <svg className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              <svg
+                className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                />
               </svg>
             </Link>
 
@@ -443,13 +551,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
               to="/library"
               title="Library (18)"
               className={`group relative flex h-8 w-8 items-center justify-center rounded-[4px] transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06] ${
-                resolvedActiveNav === 'library'
-                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]'
-                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/90 hover:border-accent-primary/40 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] border border-transparent'
+                resolvedActiveNav === "library"
+                  ? "bg-accent-primary/15 text-accent-primary border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]"
+                  : "text-text-muted hover:text-text-primary hover:bg-surface-2/90 hover:border-accent-primary/40 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] border border-transparent"
               }`}
             >
-              <svg className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              <svg
+                className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                />
               </svg>
             </Link>
 
@@ -458,13 +576,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
               to="/company-docs"
               title="Company Knowledge Base & Blueprints"
               className={`group relative flex h-8 w-8 items-center justify-center rounded-[4px] transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06] ${
-                resolvedActiveNav === 'company-docs'
-                  ? 'bg-accent-primary/15 text-accent-primary border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]'
-                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/90 hover:border-accent-primary/40 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] border border-transparent'
+                resolvedActiveNav === "company-docs"
+                  ? "bg-accent-primary/15 text-accent-primary border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]"
+                  : "text-text-muted hover:text-text-primary hover:bg-surface-2/90 hover:border-accent-primary/40 hover:shadow-[0_0_10px_rgba(217,122,63,0.18)] border border-transparent"
               }`}
             >
-              <svg className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              <svg
+                className="h-4 w-4 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
               </svg>
             </Link>
           </div>
@@ -475,16 +603,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Air-Gap Status Indicator with Hover HUD */}
           <div
             onMouseEnter={() => {
-              setShowStatusHover(true)
-              refreshHealth()
+              setShowStatusHover(true);
+              refreshHealth();
             }}
             onMouseLeave={() => setShowStatusHover(false)}
             className="flex items-center justify-center p-1.5 cursor-pointer rounded hover:bg-surface-2 transition-colors relative"
-            title={isOnline ? 'Ollama Inference Active (Air-Gapped Enclave)' : 'Ollama Service Disconnected (Offline)'}
+            title={
+              isOnline
+                ? "Ollama Inference Active (Air-Gapped Enclave)"
+                : "Ollama Service Disconnected (Offline)"
+            }
           >
             <span className="relative flex h-2 w-2">
-              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'} opacity-75`} />
-              <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              <span
+                className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? "bg-emerald-400" : "bg-amber-400"} opacity-75`}
+              />
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? "bg-emerald-500" : "bg-amber-500"}`}
+              />
             </span>
           </div>
 
@@ -495,17 +631,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={openSettings}
-            title={`Settings (${getKeybindingDisplay(keybindings, 'toggle_settings', '⌘,')})`}
+            title={`Settings (${getKeybindingDisplay(keybindings, "toggle_settings", "⌘,")})`}
             aria-label="Settings"
             className={`group relative flex h-7 w-7 items-center justify-center rounded transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] cursor-pointer motion-safe:hover:translate-x-2.5 motion-safe:hover:scale-[1.06] motion-safe:focus-visible:translate-x-2.5 motion-safe:focus-visible:scale-[1.06] ${
               isSettingsOpen
-                ? 'text-accent-primary bg-surface-2 border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]'
-                : 'text-text-muted hover:text-accent-primary hover:bg-surface-2/80 hover:border-accent-primary/30 hover:shadow-[0_0_8px_rgba(217,122,63,0.15)] border border-transparent'
+                ? "text-accent-primary bg-surface-2 border border-accent-primary/40 shadow-[0_0_10px_rgba(217,122,63,0.2)]"
+                : "text-text-muted hover:text-accent-primary hover:bg-surface-2/80 hover:border-accent-primary/30 hover:shadow-[0_0_8px_rgba(217,122,63,0.15)] border border-transparent"
             }`}
           >
-            <svg className="h-3.5 w-3.5 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <svg
+              className="h-3.5 w-3.5 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.08] motion-safe:group-hover:text-accent-primary motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
             </svg>
           </button>
 
@@ -530,7 +681,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
       </aside>
-    )
+    );
   }
 
   return (
@@ -553,6 +704,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
               STUDIO
             </div>
           </Link>
+          <span
+            title="All agent traffic is contained within the local enclave"
+            className="hidden items-center gap-1 rounded-[2px] border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-1 font-mono text-[8px] font-semibold uppercase tracking-wider text-emerald-400 sm:flex"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            Zero-egress
+          </span>
 
           {/* Minimize / Close Sidebar Button */}
           <button
@@ -562,8 +720,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
             aria-label="Minimize sidebar"
             className="group flex h-7 w-7 items-center justify-center rounded-[3px] border border-border/80 bg-surface-2/70 text-text-muted hover:text-accent-primary hover:border-accent-primary/60 transition-all cursor-pointer shrink-0"
           >
-            <svg className="h-3.5 w-3.5 transition-transform duration-200 ease-out motion-safe:group-hover:-translate-x-1 motion-safe:group-hover:scale-105 motion-safe:group-focus-visible:-translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+            <svg
+              className="h-3.5 w-3.5 transition-transform duration-200 ease-out motion-safe:group-hover:-translate-x-1 motion-safe:group-hover:scale-105 motion-safe:group-focus-visible:-translate-x-1"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M11 19l-7-7 7-7m8 14l-7-7 7-7"
+              />
             </svg>
           </button>
         </div>
@@ -583,11 +751,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     +
                   </span>
                 </span>
-                <span className="tracking-tight inline-block transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-0.5 motion-safe:group-focus-visible:translate-x-0.5">New Chat</span>
+                <span className="tracking-tight inline-block transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-0.5 motion-safe:group-focus-visible:translate-x-0.5">
+                  New Chat
+                </span>
               </button>
             </AmberUnderlineWrapper>
             <span className="font-mono text-[11px] text-text-muted">
-              {getKeybindingDisplay(keybindings, 'new_chat', '⌘N')}
+              {getKeybindingDisplay(keybindings, "new_chat", "⌘N")}
             </span>
           </div>
 
@@ -599,58 +769,110 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <div className="flex items-center gap-2">
               <span className="flex h-5 w-5 items-center justify-center rounded-[3px] bg-surface-1 border border-border/80 text-text-muted transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-1 motion-safe:group-hover:scale-[1.04] motion-safe:group-hover:border-accent-primary/40 motion-safe:group-hover:bg-surface-2 motion-safe:group-hover:text-accent-primary motion-safe:group-hover:shadow-[0_0_8px_rgba(217,122,63,0.18)] motion-safe:group-focus-visible:translate-x-1 motion-safe:group-focus-visible:scale-[1.04] shrink-0">
-                <svg className="h-3.5 w-3.5 shrink-0 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.05] motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                <svg
+                  className="h-3.5 w-3.5 shrink-0 transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.05] motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
                 </svg>
               </span>
-              <span className="font-body text-xs inline-block transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-0.5 motion-safe:group-focus-visible:translate-x-0.5">Search chats</span>
+              <span className="font-body text-xs inline-block transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-0.5 motion-safe:group-focus-visible:translate-x-0.5">
+                Search chats
+              </span>
             </div>
             <kbd className="rounded border border-border/90 bg-surface-1 px-1.5 py-0.5 font-mono text-[10px] text-text-body uppercase tracking-wider group-hover:border-accent-primary/30 transition-colors">
-              {getKeybindingDisplay(keybindings, 'open_palette', '⌘K')}
+              {getKeybindingDisplay(keybindings, "open_palette", "⌘K")}
             </kbd>
           </button>
 
           {/* Main TOC Navigation Destinations */}
           <nav aria-label="Main Navigation" className="pt-1 space-y-0.5">
             {mockNavItems.map((item: NavItem) => {
-              const isActive = resolvedActiveNav === item.id
+              const isActive = resolvedActiveNav === item.id;
               return (
                 <Link
                   key={item.id}
                   to={item.to}
                   className={`group flex items-center justify-between border-b border-border/40 py-2 px-2 text-xs transition-all duration-200 rounded-[2px] ${
                     isActive
-                      ? 'text-text-primary font-medium border-l-2 border-accent-primary bg-surface-2/60 shadow-[inset_0_0_12px_rgba(217,122,63,0.06)] pl-2.5'
-                      : 'text-text-body hover:text-text-primary hover:bg-surface-2/40 border-l-2 border-transparent'
+                      ? "text-text-primary font-medium border-l-2 border-accent-primary bg-surface-2/60 shadow-[inset_0_0_12px_rgba(217,122,63,0.06)] pl-2.5"
+                      : "text-text-body hover:text-text-primary hover:bg-surface-2/40 border-l-2 border-transparent"
                   }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span
                       className={`flex h-5 w-5 items-center justify-center rounded-[3px] transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-1 motion-safe:group-hover:scale-[1.04] motion-safe:group-hover:border-accent-primary/50 motion-safe:group-hover:shadow-[0_0_8px_rgba(217,122,63,0.2)] motion-safe:group-focus-visible:translate-x-1 motion-safe:group-focus-visible:scale-[1.04] shrink-0 ${
                         isActive
-                          ? 'bg-accent-primary/20 border border-accent-primary/40 text-accent-primary shadow-[0_0_8px_rgba(217,122,63,0.18)]'
-                          : 'bg-surface-2/70 border border-border/70 text-text-muted motion-safe:group-hover:bg-surface-2 motion-safe:group-hover:text-accent-primary'
+                          ? "bg-accent-primary/20 border border-accent-primary/40 text-accent-primary shadow-[0_0_8px_rgba(217,122,63,0.18)]"
+                          : "bg-surface-2/70 border border-border/70 text-text-muted motion-safe:group-hover:bg-surface-2 motion-safe:group-hover:text-accent-primary"
                       }`}
                     >
                       <span className="inline-flex items-center justify-center transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.05] motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]">
-                        {item.id === 'chats' && (
-                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        {item.id === "chats" && (
+                          <svg
+                            className="h-3.5 w-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                            />
                           </svg>
                         )}
-                        {item.id === 'projects' && (
-                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                        {item.id === "projects" && (
+                          <svg
+                            className="h-3.5 w-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                            />
                           </svg>
                         )}
-                        {item.id === 'library' && (
-                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                        {item.id === "library" && (
+                          <svg
+                            className="h-3.5 w-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                            />
                           </svg>
                         )}
-                        {item.id === 'company-docs' && (
-                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        {item.id === "company-docs" && (
+                          <svg
+                            className="h-3.5 w-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                            />
                           </svg>
                         )}
                       </span>
@@ -662,12 +884,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <span>{item.label}</span>
                     </AmberUnderlineWrapper>
                   </div>
-                  {item.id === 'chats' ? (
+                  {item.id === "chats" ? (
                     <span
                       className={`font-mono text-[11px] transition-colors ${
                         isActive
-                          ? 'text-accent-primary font-semibold'
-                          : 'text-text-muted group-hover:text-text-body'
+                          ? "text-accent-primary font-semibold"
+                          : "text-text-muted group-hover:text-text-body"
                       }`}
                     >
                       {chatSessions.length}
@@ -676,15 +898,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <span
                       className={`font-mono text-[11px] transition-colors ${
                         isActive
-                          ? 'text-accent-primary font-semibold'
-                          : 'text-text-muted group-hover:text-text-body'
+                          ? "text-accent-primary font-semibold"
+                          : "text-text-muted group-hover:text-text-body"
                       }`}
                     >
                       {item.count}
                     </span>
                   ) : null}
                 </Link>
-              )
+              );
             })}
           </nav>
         </div>
@@ -747,9 +969,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <button
                       type="button"
                       onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        togglePinChat(chat.id)
+                        e.preventDefault();
+                        e.stopPropagation();
+                        togglePinChat(chat.id);
                       }}
                       title="Unpin chat"
                       aria-label="Unpin chat"
@@ -799,9 +1021,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <button
                       type="button"
                       onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        togglePinChat(recent.id)
+                        e.preventDefault();
+                        e.stopPropagation();
+                        togglePinChat(recent.id);
                       }}
                       title="Pin chat to top"
                       aria-label="Pin chat to top"
@@ -827,7 +1049,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </nav>
             </section>
           )}
-
         </div>
 
         {/* User Footer Section with Status Dot HUD */}
@@ -848,16 +1069,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {/* Live Air-Gap Status Indicator */}
                 <div
                   onMouseEnter={() => {
-                    setShowStatusHover(true)
-                    refreshHealth()
+                    setShowStatusHover(true);
+                    refreshHealth();
                   }}
                   onMouseLeave={() => setShowStatusHover(false)}
                   className="flex items-center justify-center p-0.5 cursor-pointer rounded hover:bg-surface-2 transition-colors"
-                  title={isOnline ? 'Ollama Inference Active (Air-Gapped Enclave)' : 'Ollama Service Disconnected (Offline)'}
+                  title={
+                    isOnline
+                      ? "Ollama Inference Active (Air-Gapped Enclave)"
+                      : "Ollama Service Disconnected (Offline)"
+                  }
                 >
                   <span className="relative flex h-2 w-2">
-                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'} opacity-75`} />
-                    <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                    <span
+                      className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isOnline ? "bg-emerald-400" : "bg-amber-400"} opacity-75`}
+                    />
+                    <span
+                      className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? "bg-emerald-500" : "bg-amber-500"}`}
+                    />
                   </span>
                 </div>
               </div>
@@ -873,20 +1102,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={openSettings}
               className={`group inline-flex items-center gap-2 px-2 py-1 rounded text-xs transition-all duration-200 cursor-pointer ${
                 isSettingsOpen
-                  ? 'text-accent-primary font-medium bg-surface-2/80 shadow-[0_0_8px_rgba(217,122,63,0.15)]'
-                  : 'text-text-muted hover:text-text-primary hover:bg-surface-2/50'
+                  ? "text-accent-primary font-medium bg-surface-2/80 shadow-[0_0_8px_rgba(217,122,63,0.15)]"
+                  : "text-text-muted hover:text-text-primary hover:bg-surface-2/50"
               }`}
             >
               <span
                 className={`flex h-5 w-5 items-center justify-center rounded-[3px] transition-all duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:translate-x-1 motion-safe:group-hover:scale-[1.04] motion-safe:group-hover:border-accent-primary/50 motion-safe:group-hover:shadow-[0_0_8px_rgba(217,122,63,0.2)] motion-safe:group-focus-visible:translate-x-1 motion-safe:group-focus-visible:scale-[1.04] shrink-0 ${
                   isSettingsOpen
-                    ? 'bg-accent-primary/20 border border-accent-primary/40 text-accent-primary shadow-[0_0_8px_rgba(217,122,63,0.18)]'
-                    : 'bg-surface-2/70 border border-border/70 text-text-muted motion-safe:group-hover:bg-surface-2 motion-safe:group-hover:text-accent-primary'
+                    ? "bg-accent-primary/20 border border-accent-primary/40 text-accent-primary shadow-[0_0_8px_rgba(217,122,63,0.18)]"
+                    : "bg-surface-2/70 border border-border/70 text-text-muted motion-safe:group-hover:bg-surface-2 motion-safe:group-hover:text-accent-primary"
                 }`}
               >
-                <svg className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.05] motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <svg
+                  className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-safe:group-hover:scale-[1.05] motion-safe:group-hover:drop-shadow-[0_2px_8px_rgba(217,122,63,0.35)]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
                 </svg>
               </span>
               <AmberUnderlineWrapper
@@ -909,7 +1153,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
     </aside>
-  )
-}
+  );
+};
 
-export default Sidebar
+export default Sidebar;

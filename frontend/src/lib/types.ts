@@ -126,6 +126,19 @@ export interface ChatMessage {
   thinkingSteps?: string[]
   citations?: ChatCitationItem[]
   artifact?: ArtifactData
+  mcpApproval?: McpApprovalRequest
+}
+
+export type McpServerId = 'smtp_mcp' | 'alert_mcp' | 'historian_mcp'
+
+export interface McpApprovalRequest {
+  toolCallId: string
+  server: McpServerId | string
+  tool: string
+  description: string
+  parameters: Record<string, unknown>
+  securityLevel: 'standard' | 'elevated' | 'critical'
+  status: 'pending' | 'approved' | 'rejected'
 }
 
 export interface ChatSession {
