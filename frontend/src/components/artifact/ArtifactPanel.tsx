@@ -17,6 +17,7 @@ import {
   InteractiveChartCard,
   type ChartSpec,
 } from "../chat/InteractiveChartCard";
+import { BoundingBoxOverlay } from "./BoundingBoxOverlay";
 
 const normalizeMarkdownTables = (rawText: string): string => {
   if (!rawText || !rawText.includes("|")) return rawText;
@@ -139,8 +140,25 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
       artifact.files.some((f) => f.language === "markdown") ||
       Boolean(artifact.download_url));
 
+  const isSchematicArtifact =
+    Boolean(artifact.visionData) ||
+    artifact.title.toLowerCase().endsWith(".png") ||
+    artifact.title.toLowerCase().endsWith(".jpg") ||
+    artifact.title.toLowerCase().endsWith(".jpeg") ||
+    artifact.title.toLowerCase().includes("blueprint") ||
+    artifact.title.toLowerCase().includes("p&id") ||
+    artifact.title.toLowerCase().includes("schematic") ||
+    Boolean(artifact.badge?.toLowerCase().includes("vision")) ||
+    Boolean(artifact.badge?.toLowerCase().includes("spatial")) ||
+    artifact.files.some(
+      (f) =>
+        f.name.toLowerCase().endsWith(".png") ||
+        f.name.toLowerCase().endsWith(".jpg") ||
+        f.name.toLowerCase().endsWith(".jpeg"),
+    );
+
   const [activeTab, setActiveTab] = useState<ArtifactTab>(
-    isVisualComponent || isDocumentArtifact || isChartArtifact
+    isVisualComponent || isDocumentArtifact || isChartArtifact || isSchematicArtifact
       ? "preview"
       : "code",
   );
@@ -1269,6 +1287,21 @@ export const ArtifactPanel: React.FC<ArtifactPanelProps> = ({
                       <InteractiveChartCard
                         spec={parsedChartSpec}
                         isExpanded={true}
+                      />
+                    </div>
+                  </div>
+                ) : isSchematicArtifact ? (
+                  /* 2D Spatial Grounding & Bounding Box Blueprint Overlay Viewport */
+                  <div className="space-y-4 max-w-5xl mx-auto font-body">
+                    <div className="w-full h-[640px]">
+                      <BoundingBoxOverlay
+                        imageUrl={
+                          artifact.visionData?.image_url ||
+                          artifact.download_url ||
+                          "/storage/uploads/ws_alpha_01/drawing_pid_sheet1.png"
+                        }
+                        visionData={artifact.visionData}
+                        title={selectedFile || artifact.title}
                       />
                     </div>
                   </div>

@@ -42,6 +42,17 @@ RULES FOR PHYSICS:
 3. "status" must be "PASS" (green), "WARNING" (amber), or "FAIL" (red).
 4. "marginOfSafety" must be a float or integer representing percentage above limit (e.g. 18.4).
 5. Always state the relevant industrial code/standard (e.g. ASME Sec VIII Div 1, API 510, API 530, TEMA).
+6. In Python calculation code, ALWAYS use true ASME Section VIII UG-27 formulas:
+   - Required Thickness: t_req = (P * R) / (S * E - 0.6 * P) + CA
+   - Circumferential Tensile Hoop Stress: sigma_hoop = (P * (R + 0.6 * t_corroded)) / t_corroded. (Never confuse the denominator (S * E - 0.6 * P) with hoop stress!).
+   - Vessel Shell MAWP: MAWP = (S * E * t_corroded) / (R + 0.6 * t_corroded) where t_corroded = t_nominal - CA.
+   - MANDATORY UNIT HOMOGENEITY: Never mix Metric and Imperial units in equations! If material allowable stress S is in MPa and dimensions are in mm, ALL input pressure variables P in psi or bar MUST be converted to MPa (P_mpa = P_psi / 145.0377 or P_bar * 0.1) before evaluating ANY formula (both required thickness AND hoop stress). Stresses calculated with P_mpa will be in MPa.
+   - UNIT LABELS: To display pressure in bar from MPa, multiply by 10.0 (e.g. mawp_bar = mawp_mpa * 10.0). Ensure print labels accurately match the calculated unit!
+   - FABRICATED VESSEL MAWP vs DYNAMIC REQUIRED THICKNESS:
+     - For an existing vessel, fabricated nominal shell thickness t_nominal is fixed (e.g. 34.0 mm for Boiler B-401). Its baseline MAWP is calculated from t_nominal (not from t_req!). Plugging dynamic t_req back into MAWP creates an empty circular tautology where MAWP == P.
+     - In a pressure sweep, calculate dynamic Required Thickness t_req(P) and Hoop Stress sigma(P), and compare against the vessel's fixed fabricated MAWP.
+7. NEVER import ipywidgets in standalone Python scripts. Standalone scripts execute in a headless CLI terminal.
+8. CLEAN CODE BLOCKS: In your response, the ```python ... ``` block must contain ONLY executable Python code. NEVER place raw text tables, ASCII charts, or sample console output inside python code blocks! Place example outputs in separate plaintext sections outside the code block.
 """
 
 

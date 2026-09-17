@@ -966,6 +966,22 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({
                       : message,
                   ),
                 );
+              } else if (frame.event === "hitl_approval_required" && frame.hitl_approval) {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: `hitl-${frame.hitl_approval.approval_id || Date.now()}`,
+                    sender: "model",
+                    text: frame.content || "Safety Critical Interlock: Certified Engineer Digital Sign-Off is required.",
+                    timestamp: new Date().toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }),
+                    hitlApproval: frame.hitl_approval,
+                  },
+                ]);
+                setIsQueuePausedForHITL(true);
+                isQueuePausedRef.current = true;
               } else if (frame.event === "token") {
                 if (frame.token) {
                   if (!liveSteps.includes("Streaming generation…")) {
@@ -1008,6 +1024,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({
                         ],
                   citations: frame.citations || undefined,
                   artifact: frame.artifact || undefined,
+                  hitlApproval: frame.hitl_approval || undefined,
                 };
 
                 if (frame.artifact) {

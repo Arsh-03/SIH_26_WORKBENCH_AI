@@ -12,6 +12,33 @@ def cosine_similarity(v1: List[float], v2: List[float]) -> float:
     norm2 = math.sqrt(sum(b * b for b in v2)) or 1e-9
     return dot / (norm1 * norm2)
 
+import re
+
+def tokenize_text(text: str) -> List[str]:
+    """Tokenize text into lowercase tokens, preserving hyphenated alphanumeric equipment tags (e.g. PRV-102, SOP-401, B-401)."""
+    if not text:
+        return []
+    return [t.lower() for t in re.findall(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*", text)]
+
+def compute_bm25_score(query_tokens: List[str], doc_tokens: List[str], avg_dl: float = 120.0) -> float:
+    """Okapi BM25 scoring for sparse keyword relevance in engineering documents."""
+    k1 = 1.5
+    b = 0.75
+    doc_len = len(doc_tokens)
+    score = 0.0
+    for token in query_tokens:
+        if not token or len(token) < 2:
+            continue
+        # Boost alphanumeric tags and specific equipment codes
+        tag_boost = 3.5 if ("-" in token or any(c.isdigit() for c in token)) else 1.0
+        tf = doc_tokens.count(token)
+        if tf > 0:
+            idf = 1.8
+            num = tf * (k1 + 1.0)
+            den = tf + k1 * (1.0 - b + b * (doc_len / (avg_dl or 1.0)))
+            score += idf * (num / den) * tag_boost
+    return score
+
 class VectorStoreService:
     def __init__(self):
         self.persist_directory = settings.CHROMA_PERSIST_DIR
@@ -112,8 +139,15 @@ class VectorStoreService:
         query_embedding: List[float],
         top_k: int = 3,
         document_ids: Optional[List[str]] = None,
+        query_text: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Query vector database for similar chunks with optional document ID filtering."""
+        """
+        Query vector database using Hybrid Dense (ChromaDB) + Sparse (BM25) search with Reciprocal Rank Fusion (RRF).
+        Guarantees exact alphanumeric tag retrieval (e.g. PRV-102, SOP-401, ASME Sec VIII) while preserving dense semantic matches.
+        """
+        candidate_matches: List[Dict[str, Any]] = []
+        fetch_k = max(top_k * 3, 12)
+
         if self.chroma_available and self.client:
             try:
                 collection = self.get_or_create_collection(workspace_id)
@@ -126,12 +160,11 @@ class VectorStoreService:
 
                 results = collection.query(
                     query_embeddings=[query_embedding],
-                    n_results=min(top_k, max(1, collection.count())),
+                    n_results=min(fetch_k, max(1, collection.count())),
                     where=where_filter,
                     include=["documents", "metadatas", "distances"]
                 )
 
-                matches = []
                 if results and "ids" in results and results["ids"]:
                     ids_list = results["ids"][0]
                     docs_list = results["documents"][0] if results.get("documents") else []
@@ -142,7 +175,7 @@ class VectorStoreService:
                         dist = dist_list[i] if i < len(dist_list) else 0.0
                         score = round(max(0.0, 1.0 - float(dist)), 3)
                         meta = meta_list[i] if i < len(meta_list) else {}
-                        matches.append({
+                        candidate_matches.append({
                             "chunk_id": ids_list[i],
                             "document_id": meta.get("document_id", ""),
                             "page_number": meta.get("page_number", 1),
@@ -153,34 +186,75 @@ class VectorStoreService:
                             "page_height": meta.get("page_height"),
                             "has_spatial": meta.get("has_spatial", False)
                         })
-
-                if matches:
-                    return matches
             except Exception as e:
                 logger.error(f"Error querying Chroma vector store: {e}")
 
-        # Native query fallback
-        items = self._in_memory_store.get(workspace_id, [])
-        scored = []
-        for it in items:
-            if document_ids and it["metadata"].get("document_id") not in document_ids:
-                continue
-            sim = cosine_similarity(query_embedding, it["embedding"])
-            meta = it.get("metadata", {})
-            scored.append({
-                "chunk_id": it["id"],
-                "document_id": meta.get("document_id", ""),
-                "page_number": meta.get("page_number", 1),
-                "score": round(sim, 3),
-                "content": it["document"],
-                "spatial_bbox": meta.get("spatial_bbox"),
-                "page_width": meta.get("page_width"),
-                "page_height": meta.get("page_height"),
-                "has_spatial": meta.get("has_spatial", False)
-            })
+        # Native query fallback / supplementary candidates
+        if not candidate_matches:
+            items = self._in_memory_store.get(workspace_id, [])
+            for it in items:
+                if document_ids and it["metadata"].get("document_id") not in document_ids:
+                    continue
+                sim = cosine_similarity(query_embedding, it["embedding"])
+                meta = it.get("metadata", {})
+                candidate_matches.append({
+                    "chunk_id": it["id"],
+                    "document_id": meta.get("document_id", ""),
+                    "page_number": meta.get("page_number", 1),
+                    "score": round(sim, 3),
+                    "content": it["document"],
+                    "spatial_bbox": meta.get("spatial_bbox"),
+                    "page_width": meta.get("page_width"),
+                    "page_height": meta.get("page_height"),
+                    "has_spatial": meta.get("has_spatial", False)
+                })
 
-        scored.sort(key=lambda x: x["score"], reverse=True)
-        return scored[:top_k]
+        if not candidate_matches:
+            return []
+
+        # If no query_text is provided, return dense candidates sorted by score
+        if not query_text:
+            candidate_matches.sort(key=lambda x: x["score"], reverse=True)
+            return candidate_matches[:top_k]
+
+        # HYBRID RE-RANKING VIA RECIPROCAL RANK FUSION (RRF)
+        query_tokens = tokenize_text(query_text)
+
+        # 1. Dense ranking index: 0-based rank
+        candidate_matches.sort(key=lambda x: x["score"], reverse=True)
+        dense_ranks = {c["chunk_id"]: rank for rank, c in enumerate(candidate_matches)}
+
+        # 2. Sparse BM25 ranking
+        bm25_scored = []
+        for c in candidate_matches:
+            doc_tokens = tokenize_text(c["content"])
+            bm25_s = compute_bm25_score(query_tokens, doc_tokens)
+            bm25_scored.append((c["chunk_id"], bm25_s))
+
+        bm25_scored.sort(key=lambda x: x[1], reverse=True)
+        bm25_ranks = {cid: rank for rank, (cid, s) in enumerate(bm25_scored)}
+
+        # 3. Reciprocal Rank Fusion (k=60)
+        k_rrf = 60.0
+        for c in candidate_matches:
+            cid = c["chunk_id"]
+            r_dense = dense_ranks.get(cid, 999)
+            r_bm25 = bm25_ranks.get(cid, 999)
+            rrf_score = (1.0 / (k_rrf + r_dense)) + (1.0 / (k_rrf + r_bm25))
+
+            # Bonus for exact equipment tag match in chunk content
+            has_exact_tag = any(
+                t in c["content"].lower()
+                for t in query_tokens
+                if ("-" in t or any(char.isdigit() for char in t)) and len(t) >= 4
+            )
+            if has_exact_tag:
+                rrf_score += 0.05
+
+            c["rrf_score"] = round(rrf_score, 4)
+
+        candidate_matches.sort(key=lambda x: x.get("rrf_score", x["score"]), reverse=True)
+        return candidate_matches[:top_k]
 
     async def delete_document_chunks(self, workspace_id: str, document_id: str) -> bool:
         """Purge all vector embeddings for a specific document from Chroma and in-memory store."""

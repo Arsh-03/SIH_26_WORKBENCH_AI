@@ -1,4 +1,5 @@
-# 🏛️ AegisWorkbench — Enterprise Pitch Deck Specification (SIH26117)
+# 🏛️ 
+ — Enterprise Pitch Deck Specification (SIH26117)
 **Project Code:** `SIH26117` | **Target File:** `docs/ppt.md`  
 **System:** Sovereign On-Premise AI Workbench & Industrial Operating System  
 **Positioning:** Enterprise Deep-Tech Startup & Sovereign AI Platform for High-Hazard Facilities (MRPL, Refineries, Defense, Critical Infrastructure)  

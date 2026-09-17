@@ -22,6 +22,7 @@ import {
   type PhysicsSpec,
 } from "./InteractivePhysicsCard";
 import { InteractivePidCanvas, type PidSpec } from "./InteractivePidCanvas";
+import { HitlApprovalCard } from "./HitlApprovalCard";
 import { api } from "../../lib/api";
 import { useAudioPlayback } from "../../lib/AudioPlaybackContext";
 import { useWorkbench } from "../../lib/WorkbenchContext";
@@ -670,7 +671,7 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
   const [isPromptCopied, setIsPromptCopied] = React.useState(false);
   const [isAiCopied, setIsAiCopied] = React.useState(false);
   const { activeText, isPlaying, playText } = useAudioPlayback();
-  const { sendMcpDecision } = useWorkbench();
+  const { sendMcpDecision, sendMessage } = useWorkbench();
 
   React.useEffect(() => {
     const approval = message.mcpApproval;
@@ -1065,6 +1066,23 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
         </div>
       )}
 
+      {message.hitlApproval && (
+        <HitlApprovalCard
+          request={message.hitlApproval}
+          onDecision={(req, approved) => {
+            if (approved) {
+              sendMessage(
+                `[OPERATOR_SAFETY_SIGNOFF_APPROVED] Directive '${req.operation_type}' for equipment '${req.target_equipment}' authorized by Lead Plant Engineer. Digital Token: SIGN_AUTH_MRPL_${Date.now()}`
+              );
+            } else {
+              sendMessage(
+                `[OPERATOR_SAFETY_SIGNOFF_ABORTED] Directive '${req.operation_type}' for equipment '${req.target_equipment}' rejected by operator. Aborting high-temperature execution.`
+              );
+            }
+          }}
+        />
+      )}
+
       {/* Thinking Indicator if steps exist */}
       {message.thinkingDuration && (
         <ThinkingIndicator
@@ -1409,13 +1427,24 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
               ))}
             </div>
 
-            <button
-              type="button"
-              onClick={() => setIsCitationsExpanded(!isCitationsExpanded)}
-              className="font-mono text-[9.5px] text-text-muted hover:text-accent-primary transition-colors cursor-pointer"
-            >
-              {isCitationsExpanded ? "Hide Details ▲" : "All Snippets ▼"}
-            </button>
+            <div className="flex items-center gap-2">
+              <a
+                href={`/api/v1/audit/certificate/${message.id}`}
+                download={`MRPL_Audit_Certificate_${message.id}.pdf`}
+                className="inline-flex items-center gap-1 font-mono text-[9.5px] px-2 py-0.5 rounded-[3px] bg-emerald-950/50 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-900/60 hover:text-white transition-all cursor-pointer shadow-xs"
+                title="Download official cryptographically signed PDF audit compliance certificate"
+              >
+                <span>📜 Signed Audit Certificate</span>
+              </a>
+
+              <button
+                type="button"
+                onClick={() => setIsCitationsExpanded(!isCitationsExpanded)}
+                className="font-mono text-[9.5px] text-text-muted hover:text-accent-primary transition-colors cursor-pointer"
+              >
+                {isCitationsExpanded ? "Hide Details ▲" : "All Snippets ▼"}
+              </button>
+            </div>
           </div>
 
           {/* Collapsible details drawer if user explicitly clicks 'All Snippets' */}
@@ -1532,6 +1561,19 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
             </svg>
           )}
         </button>
+
+        {/* 1-Click Cryptographically Signed Audit Certificate */}
+        <a
+          href={`/api/v1/audit/certificate/${message.id}`}
+          download={`MRPL_Audit_Certificate_${message.id}.pdf`}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-[4px] font-mono text-[10px] text-emerald-300 bg-emerald-950/40 border border-emerald-500/30 hover:bg-emerald-900/50 hover:border-emerald-400 transition-all cursor-pointer shadow-2xs ml-auto"
+          title="Download official cryptographically signed PDF audit compliance certificate (PyMuPDF sovereign export)"
+        >
+          <svg className="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <span>📜 Signed Audit PDF</span>
+        </a>
       </div>
 
       {/* Human-in-the-Loop Interactive Options Card with Multi-Select */}

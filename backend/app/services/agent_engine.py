@@ -112,6 +112,46 @@ class AgentExecutionEngine:
         })
         step_counter += 1
 
+        # Check for Human-In-The-Loop (HITL) Safety Interlock
+        # Flags high-risk modifications (e.g., PRV setpoint recalibration, high-temp boiler limit changes)
+        is_safety_critical = any(
+            kw in prompt_low
+            for kw in [
+                "recalibrate", "recalibration", "reset prv", "prv-102", "trip point",
+                "relief valve reset", "override safety", "bypass interlock",
+                "480°c", "480 c", "500°c", "500 c"
+            ]
+        ) and any(
+            v in prompt_low
+            for v in ["valve", "prv", "relief", "recalibrate", "change", "adjust", "trip", "set", "boiler", "pressure"]
+        )
+
+        has_operator_signoff = (
+            "operator_safety_signoff_approved" in prompt_low
+            or "sign_auth_mrpl" in prompt_low
+            or "authorized by" in prompt_low
+        )
+
+        hitl_approval_payload = None
+        if is_safety_critical and not has_operator_signoff:
+            hitl_approval_payload = {
+                "approval_id": generate_id("hitl"),
+                "operation_type": "SAFETY_RELIEF_VALVE_RECALIBRATION",
+                "severity": "CRITICAL",
+                "target_equipment": "PRV-102 (Header Safety Relief Valve)",
+                "proposed_parameter": "Recalibrate trip setpoint to 120.0 bar (Baseline: 130.0 bar) for high-temperature operation (480°C)",
+                "standard_reference": "MRPL SOP-401 Section 3 & ASME Section VIII Div 1",
+                "advisory": "Operating Boiler B-401 at 480°C degrades effective MAWP from 160.0 bar to 128.8 bar. Recalibrating PRV-102 to 120.0 bar is mandatory to maintain safety relief margin prior to feed initiation. Chief Engineer digital sign-off is required.",
+                "requires_signoff": True,
+                "status": "pending"
+            }
+            await send_frame({
+                "event": "hitl_approval_required",
+                "step": step_counter,
+                "hitl_approval": hitl_approval_payload,
+                "content": "Safety Critical Interlock: Certified Engineer Digital Sign-Off is required per MRPL SOP-401 Section 3."
+            })
+            step_counter += 1
 
         rag_results_summary = ""
         sandbox_res = None
@@ -139,18 +179,20 @@ class AgentExecutionEngine:
             })
             step_counter += 1
 
-            # Query vector store: Search both User Workspace and Official Company Knowledge Base (company_shared)
+            # Query vector store: Search both User Workspace and Official Company Knowledge Base (company_shared) with Hybrid BM25+Dense RRF
             query_emb = await ollama_client.get_embedding(request.prompt)
             user_matches = vector_store_service.query_chunks(
                 workspace_id=request.workspace_id,
                 query_embedding=query_emb,
                 top_k=4,
-                document_ids=request.active_document_ids if request.active_document_ids else None
+                document_ids=request.active_document_ids if request.active_document_ids else None,
+                query_text=request.prompt
             )
             company_matches = vector_store_service.query_chunks(
                 workspace_id="company_shared",
                 query_embedding=query_emb,
-                top_k=4
+                top_k=4,
+                query_text=request.prompt
             )
 
             # Merge results, prioritizing exact active document matches
@@ -623,47 +665,26 @@ class AgentExecutionEngine:
             if lang_counts:
                 primary_lang = max(lang_counts, key=lang_counts.get)
 
-            # Filter blocks belonging to the primary language
+            # Filter blocks belonging explicitly to the primary language
             primary_blocks = []
             for raw_l, code_str in code_blocks:
                 norm_l = (raw_l or "").lower().strip()
                 if norm_l in ["py", "python3"]:
                     norm_l = "python"
-                if norm_l == primary_lang or not norm_l:
+                if norm_l == primary_lang and norm_l != "":
                     primary_blocks.append(code_str.strip())
 
             if len(primary_blocks) > 1 and primary_lang == "python":
-                # Combine multiple python snippets into one unified runnable simulation script
-                unique_imports = set()
-                for block in primary_blocks:
-                    for line in block.split("\n"):
-                        clean_l = line.strip()
-                        if clean_l.startswith("import ") or clean_l.startswith("from "):
-                            unique_imports.add(clean_l)
-
-                header_lines = [
-                    '"""',
-                    'Sovereign AI Engineering Workbench - Unified Execution Script',
-                    '"""',
-                    ""
-                ]
-                if unique_imports:
-                    header_lines.extend(sorted(list(unique_imports)))
-                    header_lines.append("")
-
-                combined_sections = []
-                for idx, block in enumerate(primary_blocks, 1):
-                    # Filter out top-level imports that are already consolidated
-                    body_lines = []
-                    for line in block.split("\n"):
-                        clean_l = line.strip()
-                        if not (clean_l.startswith("import ") or clean_l.startswith("from ")):
-                            body_lines.append(line)
-                    body_text = "\n".join(body_lines).strip()
-                    if body_text:
-                        combined_sections.append(f"# ==========================================\n# Step {idx}: Module Execution\n# ==========================================\n{body_text}")
-
-                code_trimmed = "\n".join(header_lines) + "\n\n" + "\n\n".join(combined_sections)
+                # Ensure only syntactically valid Python code blocks are considered
+                import ast
+                valid_python_blocks = []
+                for b in primary_blocks:
+                    try:
+                        ast.parse(b)
+                        valid_python_blocks.append(b)
+                    except Exception:
+                        pass  # Skip non-executable blocks (such as example ASCII tables or sample outputs)
+                code_trimmed = valid_python_blocks[0] if valid_python_blocks else primary_blocks[0]
             elif primary_blocks:
                 code_trimmed = primary_blocks[0]
             else:
@@ -751,6 +772,12 @@ class AgentExecutionEngine:
                     }
                 ]
             }
+
+            # Sync sanitized code back to the chat bubble message
+            if primary_blocks and code_trimmed and primary_blocks[0].strip() != code_trimmed.strip():
+                orig_b = primary_blocks[0]
+                model_response = model_response.replace(f"```{raw_lang}\n{orig_b}\n```", f"```{raw_lang}\n{code_trimmed}\n```")
+                model_response = model_response.replace(f"```\n{orig_b}\n```", f"```{raw_lang}\n{code_trimmed}\n```")
 
         # Check for dynamic visual analytics charts
         chart_specs = extract_chart_specs(model_response)
@@ -945,6 +972,7 @@ class AgentExecutionEngine:
             "content": model_response,
             "citations": [c.model_dump() for c in citations_collected],
             "artifact": artifact_data,
+            "hitl_approval": hitl_approval_payload,
             "metrics": {
                 "execution_time_ms": duration_ms,
                 "air_gap_intact": True,

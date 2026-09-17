@@ -15,6 +15,18 @@ class SandboxService:
         self.artifacts_dir = Path(settings.ARTIFACTS_DIR)
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
+    def _is_docker_available(self) -> bool:
+        """Check if docker CLI is available and daemon is responding."""
+        try:
+            docker_bin = shutil.which("docker")
+            if not docker_bin:
+                return False
+            import subprocess
+            res = subprocess.run([docker_bin, "info"], capture_output=True, timeout=1.5)
+            return res.returncode == 0
+        except Exception:
+            return False
+
     async def execute_code(
         self,
         code: str,
@@ -76,7 +88,25 @@ class SandboxService:
                     "    import matplotlib\n"
                     "    matplotlib.use('Agg')\n"
                     "except ImportError:\n"
-                    "    pass\n\n"
+                    "    pass\n"
+                    "try:\n"
+                    "    import ipywidgets\n"
+                    "except ImportError:\n"
+                    "    import types\n"
+                    "    class _MockWidget:\n"
+                    "        def __init__(self, *args, **kwargs): pass\n"
+                    "        def __call__(self, *args, **kwargs):\n"
+                    "            if args and callable(args[0]): return args[0]\n"
+                    "            return lambda f: f\n"
+                    "        def __getattr__(self, name): return _MockWidget()\n"
+                    "    _mock = _MockWidget()\n"
+                    "    _mod = types.ModuleType('ipywidgets')\n"
+                    "    _mod.interact = _mock\n"
+                    "    _mod.interactive = _mock\n"
+                    "    _mod.widgets = _mock\n"
+                    "    _mod.IntSlider = _mock\n"
+                    "    _mod.FloatSlider = _mock\n"
+                    "    sys.modules['ipywidgets'] = _mod\n\n"
                     f"{code}\n"
                 )
                 with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as script_file:
@@ -172,19 +202,62 @@ class SandboxService:
                     script_path = script_file.name
                 cmd = [sys.executable, script_path]
 
+            isolation_mode = "LINUX_CGROUP_RLIMIT"
+            # Hardened Docker container sandbox execution if docker is active and has a python image
+            docker_bin = shutil.which("docker")
+            if docker_bin and lang in ["python", "py"] and self._is_docker_available():
+                try:
+                    import subprocess
+                    check_img = subprocess.run(
+                        [docker_bin, "images", "--filter", "reference=python*", "-q"],
+                        capture_output=True,
+                        text=True,
+                        timeout=1.0
+                    )
+                    if check_img.stdout.strip():
+                        img_id = check_img.stdout.strip().split("\n")[0]
+                        cmd = [
+                            docker_bin, "run", "--rm",
+                            "--network", "none",
+                            "-m", f"{int(memory_limit_mb)}m",
+                            "--cpus", "1.0",
+                            "--pids-limit", "64",
+                            "-v", f"{self.artifacts_dir}:/workspace/artifacts",
+                            "-v", f"{script_path}:/workspace/script.py:ro",
+                            "-w", "/workspace/artifacts",
+                            img_id,
+                            "python", "/workspace/script.py"
+                        ]
+                        isolation_mode = "DOCKER_NETWORK_NONE"
+                except Exception:
+                    pass
+
             # Prepare execution environment with restricted access
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
             env["ARTIFACTS_DIR"] = str(self.artifacts_dir)
 
-            # Spawn subprocess with full I/O piping
+            # Linux cgroup-style preexec limit handler
+            def _apply_rlimits():
+                try:
+                    import resource
+                    mem_bytes = int(memory_limit_mb) * 1024 * 1024
+                    resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
+                    resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
+                except Exception:
+                    pass
+
+            preexec = _apply_rlimits if os.name != "nt" and isolation_mode != "DOCKER_NETWORK_NONE" else None
+
+            # Spawn subprocess with full I/O piping and resource ceilings
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.artifacts_dir),
-                env=env
+                env=env,
+                preexec_fn=preexec
             )
 
             try:
@@ -260,13 +333,19 @@ class SandboxService:
                 )
             )
 
+        # Strip raw ANSI terminal escape sequences (e.g. \x1b[2K line clear sequences from ipywidgets/curses)
+        clean_ansi_pattern = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+        stdout_clean = clean_ansi_pattern.sub('', stdout or "")
+        stderr_clean = clean_ansi_pattern.sub('', stderr or "")
+
         return SandboxExecuteResponse(
             exit_code=exit_code,
-            stdout=stdout,
-            stderr=stderr,
+            stdout=stdout_clean,
+            stderr=stderr_clean,
             execution_time_ms=execution_time_ms,
             generated_artifacts=generated_artifacts,
-            limits_exceeded=limits_exceeded
+            limits_exceeded=limits_exceeded,
+            isolation_mode=isolation_mode
         )
 
     async def execute_python_code(

@@ -104,6 +104,24 @@ export interface ArtifactData {
   terminalDurationMs?: number
   terminalCommand?: string
   chartSpec?: any
+  visionData?: VisionData
+}
+
+export interface BoundingBoxElement {
+  element_id: string
+  label: string
+  tag_code?: string | null
+  bounding_box_2d: [number, number, number, number]
+  confidence: number
+  category?: 'equipment' | 'valve' | 'sensor' | 'table' | 'text' | string
+}
+
+export interface VisionData {
+  image_url?: string
+  image_dimensions?: { width: number; height: number }
+  detected_elements: BoundingBoxElement[]
+  model?: string
+  processing_time_ms?: number
 }
 
 export interface ChatCitationItem {
@@ -127,6 +145,19 @@ export interface ChatMessage {
   citations?: ChatCitationItem[]
   artifact?: ArtifactData
   mcpApproval?: McpApprovalRequest
+  hitlApproval?: HitlApprovalRequest
+}
+
+export interface HitlApprovalRequest {
+  approval_id: string
+  operation_type: string
+  severity: 'CRITICAL' | 'WARNING' | 'ELEVATED' | string
+  target_equipment: string
+  proposed_parameter: string
+  standard_reference: string
+  advisory: string
+  requires_signoff: boolean
+  status?: 'pending' | 'approved' | 'rejected'
 }
 
 export type McpServerId = 'smtp_mcp' | 'alert_mcp' | 'historian_mcp'

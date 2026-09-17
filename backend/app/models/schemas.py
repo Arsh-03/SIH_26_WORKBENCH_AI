@@ -125,6 +125,7 @@ class SandboxExecuteResponse(BaseModel):
     execution_time_ms: int
     generated_artifacts: List[GeneratedArtifact]
     limits_exceeded: bool
+    isolation_mode: Optional[str] = "AIR_GAP_ENCLAVE"
 
 # Audit Models
 class AuditTraceRecord(BaseModel):
