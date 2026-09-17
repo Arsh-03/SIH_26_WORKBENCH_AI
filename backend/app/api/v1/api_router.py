@@ -11,6 +11,7 @@ from backend.app.api.v1.endpoints import (
     audit,
     artifacts,
     audio,
+    mcp,
 )
 
 api_router = APIRouter()
@@ -43,4 +44,5 @@ api_router.include_router(artifacts.router, prefix="/artifacts", tags=["Artifact
 
 # Audio Transcription
 api_router.include_router(audio.router, prefix="/audio", tags=["Audio Transcription"])
+api_router.include_router(mcp.router, prefix="/mcp", tags=["Offline MCP Action Hub"])
 

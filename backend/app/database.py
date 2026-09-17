@@ -97,6 +97,24 @@ def init_db_sync() -> None:
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS mcp_approval_audits (
+        id TEXT PRIMARY KEY,
+        tool_call_id TEXT NOT NULL UNIQUE,
+        session_id TEXT REFERENCES agent_sessions(id),
+        user_id TEXT REFERENCES users(id),
+        server TEXT NOT NULL,
+        tool_name TEXT NOT NULL,
+        parameters TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        security_level TEXT NOT NULL DEFAULT 'standard',
+        permission_required TEXT NOT NULL DEFAULT 'mcp.approve',
+        failure_reason TEXT,
+        requested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP NOT NULL,
+        decided_at TIMESTAMP,
+        completed_at TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS chat_sessions (
         id TEXT PRIMARY KEY,
         user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -154,6 +172,10 @@ def init_db_sync() -> None:
 
     conn.commit()
     conn.close()
+
+# Ensure the schema exists even when database-backed helpers are used before the
+# FastAPI lifespan has a chance to run (e.g. unit tests or direct service calls).
+init_db_sync()
 
 async def init_db() -> None:
     """Initialize database tables according to the master schema."""

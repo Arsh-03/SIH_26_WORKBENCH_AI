@@ -35,7 +35,7 @@ import {
 import { useWorkbench } from "../lib/WorkbenchContext";
 import { KeyboardShortcutsModal } from "../components/layout/KeyboardShortcutsModal";
 import { formatKeyComboDisplay, eventToKeyCombo } from "../lib/keybindings";
-import { api } from "../lib/api";
+import { api, type McpServerHealth } from "../lib/api";
 import { playCompletionChime } from "../lib/audioChime";
 import {
   requestDesktopNotificationPermission,
@@ -149,38 +149,22 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     "idle" | "testing" | "connected"
   >("idle");
   const [mcpDrawerOpen, setMcpDrawerOpen] = useState(false);
-  const [mcpStates, setMcpStates] = useState<
-    Record<McpServerId, "online" | "offline" | "checking">
-  >({
-    smtp_mcp: "checking",
-    alert_mcp: "checking",
-    historian_mcp: "checking",
+  const [mcpStates, setMcpStates] = useState<Record<McpServerId, McpServerHealth | null>>({
+    smtp_mcp: null,
+    alert_mcp: null,
+    historian_mcp: null,
   });
   const modalPanelRef = useRef<HTMLDivElement>(null);
 
   const refreshMcpStates = useCallback(async () => {
-    setMcpStates({
-      smtp_mcp: "checking",
-      alert_mcp: "checking",
-      historian_mcp: "checking",
-    });
+    setMcpStates({ smtp_mcp: null, alert_mcp: null, historian_mcp: null });
     try {
-      const health = await api.getSystemHealth();
-      const online =
-        health.gateway_status === "ok" ||
-        health.status === "ok" ||
-        health.ollama_running === true;
-      setMcpStates({
-        smtp_mcp: online ? "online" : "offline",
-        alert_mcp: online ? "online" : "offline",
-        historian_mcp: online ? "online" : "offline",
-      });
+      const health = await api.getMcpServers();
+      const next = { smtp_mcp: null, alert_mcp: null, historian_mcp: null } as Record<McpServerId, McpServerHealth | null>;
+      health.servers.forEach((server) => { next[server.server_id] = server; });
+      setMcpStates(next);
     } catch {
-      setMcpStates({
-        smtp_mcp: "offline",
-        alert_mcp: "offline",
-        historian_mcp: "offline",
-      });
+      setMcpStates({ smtp_mcp: null, alert_mcp: null, historian_mcp: null });
     }
   }, []);
 
@@ -2391,12 +2375,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                           {server.id}
                         </span>
                         <span
-                          className={`flex items-center gap-1 text-[9px] uppercase ${mcpStates[server.id] === "online" ? "text-emerald-400" : mcpStates[server.id] === "checking" ? "text-accent-primary" : "text-accent-secondary"}`}
+                          className={`flex items-center gap-1 text-[9px] uppercase ${mcpStates[server.id]?.status === "configured" || mcpStates[server.id]?.status === "online" ? "text-emerald-400" : mcpStates[server.id] ? "text-accent-secondary" : "text-accent-primary"}`}
                         >
                           <span
-                            className={`h-1.5 w-1.5 rounded-full ${mcpStates[server.id] === "online" ? "bg-emerald-400" : mcpStates[server.id] === "checking" ? "bg-accent-primary animate-pulse" : "bg-accent-secondary"}`}
+                            className={`h-1.5 w-1.5 rounded-full ${mcpStates[server.id]?.status === "configured" || mcpStates[server.id]?.status === "online" ? "bg-emerald-400" : mcpStates[server.id] ? "bg-accent-secondary" : "bg-accent-primary animate-pulse"}`}
                           />
-                          {mcpStates[server.id]}
+                          {mcpStates[server.id]?.status || "checking"}
                         </span>
                       </div>
                       <p className="mt-1 font-body text-[10px] leading-relaxed text-text-muted">
@@ -2426,6 +2410,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                           <span className="text-text-primary">{server.id}</span>
                           <span className="ml-2 text-[10px] text-text-muted">
                             {server.description}
+                          </span>
+                          <span className="ml-2 text-[9px] text-text-muted">
+                            {mcpStates[server.id]?.failure_reason || "Local endpoint healthy"}
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-1">

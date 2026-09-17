@@ -162,7 +162,10 @@ export interface WorkbenchContextType {
     options?: { isRegenerate?: boolean; initialStatusStep?: string },
   ) => Promise<void>;
   stopStreaming: () => void;
-  sendMcpDecision: (request: McpApprovalRequest, approved: boolean) => void;
+  sendMcpDecision: (
+    request: McpApprovalRequest,
+    approved: boolean,
+  ) => Promise<void>;
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
 
   // Message Queuing System & HITL Suspension
@@ -646,19 +649,28 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [abortController]);
 
   const sendMcpDecision = useCallback(
-    (request: McpApprovalRequest, approved: boolean) => {
-      const socket = activeAgentSocketRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN) return;
-      socket.send(
-        JSON.stringify({
-          action: "mcp_approval",
-          tool_call_id: request.toolCallId,
-          approved,
-          tool_name: request.tool,
-          server: request.server,
-          parameters: request.parameters,
-        }),
-      );
+    async (request: McpApprovalRequest, approved: boolean) => {
+      if (request.status !== "pending") return;
+      if (
+        request.expiresAt &&
+        new Date(request.expiresAt).getTime() <= Date.now()
+      ) {
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.mcpApproval?.toolCallId === request.toolCallId
+              ? {
+                  ...message,
+                  mcpApproval: {
+                    ...request,
+                    status: "cancelled",
+                    failureReason: "Approval request expired",
+                  },
+                }
+              : message,
+          ),
+        );
+        return;
+      }
       setMessages((prev) =>
         prev.map((message) =>
           message.mcpApproval?.toolCallId === request.toolCallId
@@ -666,12 +678,72 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({
                 ...message,
                 mcpApproval: {
                   ...request,
-                  status: approved ? "approved" : "rejected",
+                  status: approved ? "executing" : "rejected",
                 },
               }
             : message,
         ),
       );
+      const socket = activeAgentSocketRef.current;
+      try {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          const token = localStorage.getItem("sovereign_auth_token");
+          socket.send(
+            JSON.stringify({
+              action: "mcp_approval",
+              tool_call_id: request.toolCallId,
+              approved,
+              tool_name: request.tool,
+              server: request.server,
+              parameters: request.parameters,
+              token,
+              auth_token: token,
+            }),
+          );
+        } else {
+          const result = await api.decideMcpApproval(
+            request.toolCallId,
+            approved,
+          );
+          if (result.status !== "approved" && result.status !== "rejected")
+            throw new Error(
+              result.failure_reason || "MCP decision was not accepted",
+            );
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.mcpApproval?.toolCallId === request.toolCallId
+                ? {
+                    ...message,
+                    mcpApproval: {
+                      ...request,
+                      status: result.status as McpApprovalRequest["status"],
+                      failureReason: result.failure_reason || undefined,
+                    },
+                  }
+                : message,
+            ),
+          );
+        }
+      } catch (error) {
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.mcpApproval?.toolCallId === request.toolCallId
+              ? {
+                  ...message,
+                  mcpApproval: {
+                    ...request,
+                    status: "failed",
+                    failureReason:
+                      error instanceof Error
+                        ? error.message
+                        : "MCP gateway disconnected",
+                  },
+                }
+              : message,
+          ),
+        );
+        return;
+      }
       setIsQueuePausedForHITL(false);
       isQueuePausedRef.current = false;
     },
@@ -861,6 +933,7 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({
                           ? "elevated"
                           : "standard",
                     status: "pending",
+                    expiresAt: frame.mcp_approval_expires_at,
                   };
                   setMessages((prev) => [
                     ...prev,
@@ -878,6 +951,21 @@ export const WorkbenchProvider: React.FC<{ children: React.ReactNode }> = ({
                   setIsQueuePausedForHITL(true);
                   isQueuePausedRef.current = true;
                 }
+              } else if (frame.event === "mcp_approval_status") {
+                setMessages((prev) =>
+                  prev.map((message) =>
+                    message.mcpApproval?.toolCallId === frame.tool_call_id
+                      ? {
+                          ...message,
+                          mcpApproval: {
+                            ...message.mcpApproval!,
+                            status: frame.status,
+                            failureReason: frame.failure_reason || undefined,
+                          },
+                        }
+                      : message,
+                  ),
+                );
               } else if (frame.event === "token") {
                 if (frame.token) {
                   if (!liveSteps.includes("Streaming generation…")) {

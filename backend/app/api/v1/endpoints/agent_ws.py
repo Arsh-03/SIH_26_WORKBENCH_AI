@@ -8,6 +8,8 @@ from backend.app.models.sql_models import AgentSession, Workspace, DBChatSession
 from backend.app.models.schemas import AgentRunRequest
 from backend.app.services.agent_engine import agent_engine
 from backend.app.core.auth import decode_access_token
+from backend.app.services.mcp_service import MCP_CATALOG, create_approval, decide_approval, get_approval, record_execution_result
+from backend.app.models.sql_models import User
 
 router = APIRouter()
 logger = logging.getLogger("agent_ws")
@@ -128,6 +130,23 @@ async def agent_websocket_endpoint(websocket: WebSocket, session_id: str):
                     collected_thoughts = []
 
                     async def send_frame(frame_dict: dict):
+                        if frame_dict.get("event") == "tool_call":
+                            tool_name = str(frame_dict.get("tool_name", ""))
+                            server = next((server_id for server_id in MCP_CATALOG if tool_name.startswith(server_id) or tool_name.startswith(server_id.replace("_mcp", "_"))), None)
+                            if server:
+                                approval = await create_approval(
+                                    db_session,
+                                    tool_call_id=frame_dict.get("tool_call_id") or f"mcp_{uuid.uuid4().hex[:12]}",
+                                    session_id=session_id,
+                                    user_id=user_id,
+                                    server=server,
+                                    tool_name=tool_name,
+                                    parameters=frame_dict.get("parameters") or {},
+                                    security_level="critical" if server == "alert_mcp" else "elevated" if server == "smtp_mcp" else "standard",
+                                )
+                                frame_dict["tool_call_id"] = approval.tool_call_id
+                                frame_dict["mcp_approval_expires_at"] = approval.expires_at.isoformat() + "Z"
+                                frame_dict["mcp_approval_status"] = approval.status
                         await websocket.send_json(frame_dict)
                         # Collect reasoning steps
                         if frame_dict.get("event") == "thought" and frame_dict.get("content"):
@@ -204,6 +223,41 @@ async def agent_websocket_endpoint(websocket: WebSocket, session_id: str):
                                 "error": str(loop_err)
                             }
                         })
+            elif action == "mcp_approval":
+                token_str = data.get("token") or data.get("auth_token")
+                token_payload = decode_access_token(token_str) if token_str else None
+                user_id = token_payload.get("sub") if token_payload else None
+                async with AsyncSessionLocal() as db_session:
+                    approval = await get_approval(db_session, str(data.get("tool_call_id", "")))
+                    if not approval:
+                        await websocket.send_json({
+                            "event": "mcp_approval_status",
+                            "tool_call_id": data.get("tool_call_id"),
+                            "status": "failed",
+                            "failure_reason": "MCP approval request not found",
+                        })
+                        continue
+                    user = await db_session.get(User, user_id) if user_id else None
+                    updated = await decide_approval(
+                        db_session,
+                        approval,
+                        approved=bool(data.get("approved", False)),
+                        user=user,
+                    )
+                    await websocket.send_json({
+                        "event": "mcp_approval_status",
+                        "tool_call_id": updated.tool_call_id,
+                        "status": updated.status,
+                        "failure_reason": updated.failure_reason,
+                    })
+            elif action == "mcp_execution_result":
+                async with AsyncSessionLocal() as db_session:
+                    approval = await get_approval(db_session, str(data.get("tool_call_id", "")))
+                    if not approval:
+                        await websocket.send_json({"event": "mcp_approval_status", "tool_call_id": data.get("tool_call_id"), "status": "failed", "failure_reason": "MCP approval request not found"})
+                        continue
+                    updated = await record_execution_result(db_session, approval, completed=bool(data.get("completed", False)), failure_reason=data.get("failure_reason"))
+                    await websocket.send_json({"event": "mcp_approval_status", "tool_call_id": updated.tool_call_id, "status": updated.status, "failure_reason": updated.failure_reason})
             elif action == "ping":
                 await websocket.send_json({"event": "pong", "timestamp": datetime.datetime.utcnow().isoformat() + "Z"})
             else:

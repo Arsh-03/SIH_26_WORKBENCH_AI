@@ -138,7 +138,9 @@ export interface McpApprovalRequest {
   description: string
   parameters: Record<string, unknown>
   securityLevel: 'standard' | 'elevated' | 'critical'
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'rejected' | 'cancelled'
+  expiresAt?: string
+  failureReason?: string
 }
 
 export interface ChatSession {

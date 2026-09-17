@@ -79,6 +79,26 @@ class AuditLog(Base):
     session = relationship("AgentSession", back_populates="audit_logs")
 
 
+class McpApprovalAudit(Base):
+    __tablename__ = "mcp_approval_audits"
+
+    id = Column(String, primary_key=True, index=True)
+    tool_call_id = Column(String, nullable=False, unique=True, index=True)
+    session_id = Column(String, ForeignKey("agent_sessions.id"), nullable=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
+    server = Column(String, nullable=False)
+    tool_name = Column(String, nullable=False)
+    parameters = Column(Text, nullable=False)
+    status = Column(String, nullable=False, default="pending")
+    security_level = Column(String, nullable=False, default="standard")
+    permission_required = Column(String, nullable=False, default="mcp.approve")
+    failure_reason = Column(Text, nullable=True)
+    requested_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    decided_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+
 class User(Base):
     __tablename__ = "users"
 

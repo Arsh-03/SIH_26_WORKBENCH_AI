@@ -672,6 +672,23 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
   const { activeText, isPlaying, playText } = useAudioPlayback();
   const { sendMcpDecision } = useWorkbench();
 
+  React.useEffect(() => {
+    const approval = message.mcpApproval;
+    if (!approval || approval.status !== "pending" || !approval.expiresAt)
+      return;
+    const remaining = new Date(approval.expiresAt).getTime() - Date.now();
+    const expire = () => {
+      if (message.mcpApproval?.status !== "pending") return;
+      void sendMcpDecision(approval, false);
+    };
+    if (remaining <= 0) {
+      expire();
+      return;
+    }
+    const timer = window.setTimeout(expire, remaining);
+    return () => window.clearTimeout(timer);
+  }, [message.mcpApproval, sendMcpDecision]);
+
   const isUser = message.sender === "user";
 
   const handleCopyPrompt = async () => {
@@ -971,7 +988,7 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
 
       {message.mcpApproval && (
         <div
-          className={`w-full rounded-[4px] border bg-surface-1 p-4 font-mono text-xs shadow-sm ${message.mcpApproval.status === "pending" ? "border-accent-primary/60" : message.mcpApproval.status === "approved" ? "border-emerald-500/50" : "border-accent-secondary/60"}`}
+          className={`w-full rounded-[4px] border bg-surface-1 p-4 font-mono text-xs shadow-sm ${message.mcpApproval.status === "pending" ? "border-accent-primary/60" : ["approved", "executing", "completed"].includes(message.mcpApproval.status) ? "border-emerald-500/50" : "border-accent-secondary/60"}`}
         >
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/70 pb-3">
             <div className="flex items-start gap-2">
@@ -1006,26 +1023,43 @@ export const MessageBlock: React.FC<MessageBlockProps> = ({
             <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={() => sendMcpDecision(message.mcpApproval!, false)}
-                className="rounded-[2px] border border-accent-secondary/60 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-accent-secondary hover:bg-accent-secondary/15"
+                disabled={message.mcpApproval.status !== "pending"}
+                onClick={() => {
+                  if (message.mcpApproval?.status !== "pending") return;
+                  void sendMcpDecision(message.mcpApproval, false);
+                }}
+                className="rounded-[2px] border border-accent-secondary/60 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-accent-secondary hover:bg-accent-secondary/15 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Reject &amp; Cancel
               </button>
               <button
                 type="button"
-                onClick={() => sendMcpDecision(message.mcpApproval!, true)}
-                className="rounded-[2px] bg-accent-primary px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-background hover:brightness-110"
+                disabled={message.mcpApproval.status !== "pending"}
+                onClick={() => {
+                  if (message.mcpApproval?.status !== "pending") return;
+                  void sendMcpDecision(message.mcpApproval, true);
+                }}
+                className="rounded-[2px] bg-accent-primary px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-background hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Approve &amp; Execute
               </button>
             </div>
           ) : (
             <div
-              className={`mt-3 text-right text-[10px] uppercase tracking-widest ${message.mcpApproval.status === "approved" ? "text-emerald-400" : "text-accent-secondary"}`}
+              className={`mt-3 text-right text-[10px] uppercase tracking-widest ${["approved", "executing", "completed"].includes(message.mcpApproval.status) ? "text-emerald-400" : "text-accent-secondary"}`}
             >
-              {message.mcpApproval.status === "approved"
-                ? "Approved · execution released"
-                : "Rejected · execution cancelled"}
+              {message.mcpApproval.status === "approved" &&
+                "Approved · execution released"}
+              {message.mcpApproval.status === "executing" &&
+                "Executing · MCP action in progress"}
+              {message.mcpApproval.status === "completed" &&
+                "Completed · MCP action finished"}
+              {message.mcpApproval.status === "failed" &&
+                `Failed · ${message.mcpApproval.failureReason || "MCP action failed"}`}
+              {message.mcpApproval.status === "rejected" &&
+                `Rejected · ${message.mcpApproval.failureReason || "execution cancelled"}`}
+              {message.mcpApproval.status === "cancelled" &&
+                `Cancelled · ${message.mcpApproval.failureReason || "approval expired"}`}
             </div>
           )}
         </div>

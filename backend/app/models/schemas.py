@@ -139,6 +139,41 @@ class AuditTracesResponse(BaseModel):
     total_records: int
     records: List[AuditTraceRecord]
 
+# Offline MCP Action Hub
+class McpServerHealth(BaseModel):
+    server_id: str
+    display_name: str
+    status: str
+    heartbeat_at: Optional[str] = None
+    version: Optional[str] = None
+    capabilities: List[str] = Field(default_factory=list)
+    permissions: List[str] = Field(default_factory=list)
+    failure_reason: Optional[str] = None
+    zero_egress: bool = True
+
+class McpServerHealthResponse(BaseModel):
+    servers: List[McpServerHealth]
+    checked_at: str
+
+class McpApprovalDecision(BaseModel):
+    approved: bool
+
+class McpApprovalResponse(BaseModel):
+    approval_id: str
+    tool_call_id: str
+    status: str
+    failure_reason: Optional[str] = None
+    decided_at: Optional[str] = None
+
+class McpApprovalContract(BaseModel):
+    """Bilateral WebSocket envelope for MCP approval decisions."""
+    action: str = "mcp_approval"
+    tool_call_id: str
+    approved: bool
+    tool_name: str
+    server: str
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
 # System Telemetry Models
 class NetworkIsolationTelemetry(BaseModel):
     air_gap_active: bool = True

@@ -4,6 +4,23 @@
  */
 import type { ChatSession, ChatMessage, UserProfile } from './types'
 
+export interface McpServerHealth {
+  server_id: 'smtp_mcp' | 'alert_mcp' | 'historian_mcp'
+  display_name: string
+  status: 'configured' | 'offline' | 'checking' | 'online' | string
+  heartbeat_at?: string | null
+  version?: string | null
+  capabilities: string[]
+  permissions: string[]
+  failure_reason?: string | null
+  zero_egress: boolean
+}
+
+export interface McpServerHealthResponse {
+  servers: McpServerHealth[]
+  checked_at: string
+}
+
 export interface SystemHealth {
   gateway_status?: string
   status?: string
@@ -479,6 +496,31 @@ export const api = {
       body: JSON.stringify({ code, language, timeout_seconds: timeoutSeconds, stdin }),
     })
     if (!res.ok) throw new Error(`Sandbox execution failed: ${res.statusText}`)
+    return res.json()
+  },
+
+  async getMcpServers(): Promise<McpServerHealthResponse> {
+    const res = await fetch(`${API_BASE}/mcp/servers`, { headers: getAuthHeaders() })
+    if (!res.ok) throw new Error(`MCP health check failed: ${res.statusText}`)
+    return res.json()
+  },
+
+  async getMcpServer(serverId: string): Promise<McpServerHealth> {
+    const res = await fetch(`${API_BASE}/mcp/servers/${encodeURIComponent(serverId)}`, { headers: getAuthHeaders() })
+    if (!res.ok) throw new Error(`MCP server lookup failed: ${res.statusText}`)
+    return res.json()
+  },
+
+  async decideMcpApproval(toolCallId: string, approved: boolean): Promise<{ status: string; failure_reason?: string | null }> {
+    const res = await fetch(`${API_BASE}/mcp/approvals/${encodeURIComponent(toolCallId)}/decision`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ approved }),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}))
+      throw new Error(error.detail || `MCP approval failed: ${res.statusText}`)
+    }
     return res.json()
   },
 
