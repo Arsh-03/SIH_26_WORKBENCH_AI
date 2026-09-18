@@ -72,6 +72,8 @@ class ChunkCitation(BaseModel):
     page_number: int
     snippet: str
     content: Optional[str] = None
+    bounding_box_2d: Optional[List[int]] = Field(default=None, description="[ymin, xmin, ymax, xmax] spatial coordinates")
+    page_dimensions: Optional[ImageDimensions] = Field(default=None, description="Page width and height dimensions")
 
 class AgentFinalResponse(BaseModel):
     event: str = "final_answer"
@@ -326,5 +328,52 @@ class CVRunnerResponse(BaseModel):
     total_pages: int
     pages: List[CVPageResult] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
+
+
+# Phase 2 Spatial Metadata & Normalized Document Models
+class SpatialBoundingBox(BaseModel):
+    """
+    Standardized 2D spatial bounding box maintaining [ymin, xmin, ymax, xmax] coordinate convention.
+    """
+    ymin: int = 0
+    xmin: int = 0
+    ymax: int = 0
+    xmax: int = 0
+    confidence: Optional[float] = 1.0
+
+    def to_box_2d(self) -> List[int]:
+        return [self.ymin, self.xmin, self.ymax, self.xmax]
+
+    @classmethod
+    def from_box_2d(cls, box: List[int], confidence: Optional[float] = 1.0) -> "SpatialBoundingBox":
+        if len(box) >= 4:
+            return cls(ymin=box[0], xmin=box[1], ymax=box[2], xmax=box[3], confidence=confidence)
+        return cls(ymin=0, xmin=0, ymax=0, xmax=0, confidence=confidence)
+
+
+class StructuredDocumentPage(BaseModel):
+    """
+    Normalized representation of a single document page containing spatial text blocks,
+    extracted tabular structures, layout nodes, and page dimensions.
+    """
+    page_number: int
+    width: int
+    height: int
+    text_blocks: List[CVTextBlock] = Field(default_factory=list)
+    tables: List[Dict[str, Any]] = Field(default_factory=list)
+    layout_elements: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class NormalizedDocument(BaseModel):
+    """
+    Unified structured document schema representing complete page hierarchy, layout nodes,
+    and spatial extraction metadata across native PDFs, scanned PDFs, and images.
+    """
+    document_id: str
+    filename: str
+    file_type: str
+    total_pages: int
+    pages: List[StructuredDocumentPage] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

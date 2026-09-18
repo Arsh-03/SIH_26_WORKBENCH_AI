@@ -23,6 +23,9 @@ from backend.app.models.schemas import (
     AuditTraceRecord,
     AuditTracesResponse,
     SystemHealthResponse,
+    SpatialBoundingBox,
+    StructuredDocumentPage,
+    NormalizedDocument,
 )
 
 __all__ = [
@@ -48,4 +51,7 @@ __all__ = [
     "AuditTraceRecord",
     "AuditTracesResponse",
     "SystemHealthResponse",
+    "SpatialBoundingBox",
+    "StructuredDocumentPage",
+    "NormalizedDocument",
 ]
