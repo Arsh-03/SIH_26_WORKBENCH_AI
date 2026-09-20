@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Callable, Awaitable, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.security import generate_id, compute_sha256
-from backend.app.models.schemas import AgentRunRequest, ChunkCitation
+from backend.app.models.schemas import AgentRunRequest, ChunkCitation, ImageDimensions
 from backend.app.models.sql_models import AuditLog, AgentSession
 from backend.app.config import settings
 from backend.app.services.ollama_client import ollama_client
@@ -204,12 +204,40 @@ class AgentExecutionEngine:
                     clean_doc_id = re.sub(r"^company_doc_", "", raw_doc_id)
                     clean_doc_id = re.sub(r"_md$", ".md", clean_doc_id)
                     full_txt = m.get("content", "")
+                    # Safely parse spatial bounding box and page dimensions if available
+                    bbox_2d = None
+                    raw_bbox = m.get("spatial_bbox")
+                    if raw_bbox:
+                        if isinstance(raw_bbox, list):
+                            bbox_2d = raw_bbox
+                        elif isinstance(raw_bbox, str):
+                            try:
+                                parsed_bbox = json.loads(raw_bbox)
+                                if isinstance(parsed_bbox, list):
+                                    bbox_2d = parsed_bbox
+                            except Exception:
+                                bbox_2d = None
+
+                    page_dims = None
+                    p_w = m.get("page_width")
+                    p_h = m.get("page_height")
+                    if p_w is not None and p_h is not None:
+                        try:
+                            p_w_int = int(p_w)
+                            p_h_int = int(p_h)
+                            if p_w_int > 0 and p_h_int > 0:
+                                page_dims = ImageDimensions(width=p_w_int, height=p_h_int)
+                        except (ValueError, TypeError):
+                            page_dims = None
+
                     citation = ChunkCitation(
                         document_id=clean_doc_id,
                         chunk_id=m.get("chunk_id", f"chk_{idx}"),
                         page_number=m.get("page_number", 1),
                         snippet=full_txt[:320].strip(),
-                        content=full_txt.strip()
+                        content=full_txt.strip(),
+                        bounding_box_2d=bbox_2d,
+                        page_dimensions=page_dims
                     )
                     citations_collected.append(citation)
                     citation_traces.append(f"{citation.document_id}#{citation.chunk_id}")
