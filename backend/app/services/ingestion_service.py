@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.config import settings
 from backend.app.core.security import generate_id
+from backend.app.models.schemas import NormalizedDocument
 from backend.app.models.sql_models import Document, DocumentChunk
 from backend.app.services.ollama_client import ollama_client
 from backend.app.services.vector_store import vector_store_service
@@ -46,6 +47,7 @@ class DocumentIngestionService:
         """
         Helper method to invoke CVClient worker and format page OCR/tables into chunk dictionaries
         with preserved spatial metadata (bounding boxes, page dimensions, block/table IDs).
+        Now normalizes CVRunnerResponse into NormalizedDocument before generating spatial chunks.
         """
         all_chunks: List[Dict[str, Any]] = []
         cv_res = await cv_client.run_cv_runner(input_path=filepath, confidence=0.40)
@@ -53,10 +55,21 @@ class DocumentIngestionService:
         if cv_res.status != "success" or not cv_res.pages:
             raise RuntimeError(f"CVClient runner failed or returned empty payload: {cv_res.errors}")
 
-        for page_info in cv_res.pages:
+        # Normalize raw CVRunnerResponse into NormalizedDocument runtime model
+        doc_filename = os.path.basename(filepath)
+        ext_type = os.path.splitext(doc_filename)[1].lstrip(".") or "pdf"
+        normalized_doc = NormalizedDocument.from_cv_runner_response(
+            cv_res=cv_res,
+            document_id=f"doc_{os.path.splitext(doc_filename)[0]}",
+            filename=doc_filename,
+            file_type=ext_type
+        )
+
+        for page_info in normalized_doc.pages:
             p_num = page_info.page_number
             p_w = page_info.width
             p_h = page_info.height
+
 
             # 1. Process OCR text blocks into spatial text chunks
             valid_blocks = [b for b in page_info.text_blocks if b.text and b.text.strip()]
@@ -129,7 +142,7 @@ class DocumentIngestionService:
                             }
                         })
 
-        return all_chunks, cv_res.total_pages
+        return all_chunks, normalized_doc.total_pages
 
     async def extract_text_and_chunks_from_file(self, filepath: str, file_type: str) -> Tuple[List[Dict[str, Any]], int]:
         """

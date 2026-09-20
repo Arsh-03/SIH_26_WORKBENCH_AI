@@ -376,4 +376,36 @@ class NormalizedDocument(BaseModel):
     pages: List[StructuredDocumentPage] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    @classmethod
+    def from_cv_runner_response(
+        cls,
+        cv_res: "CVRunnerResponse",
+        document_id: str = "doc_normalized",
+        filename: str = "",
+        file_type: str = "pdf",
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> "NormalizedDocument":
+        """
+        Convert raw CVRunnerResponse into typed, unified NormalizedDocument runtime representation.
+        """
+        structured_pages: List[StructuredDocumentPage] = []
+        for p in cv_res.pages:
+            structured_pages.append(
+                StructuredDocumentPage(
+                    page_number=p.page_number,
+                    width=p.width,
+                    height=p.height,
+                    text_blocks=p.text_blocks,
+                    tables=p.tables,
+                    layout_elements=[]
+                )
+            )
 
+        return cls(
+            document_id=document_id,
+            filename=filename,
+            file_type=file_type,
+            total_pages=cv_res.total_pages,
+            pages=structured_pages,
+            metadata=metadata or {}
+        )
