@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from typing import List, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,7 +44,8 @@ class DocumentIngestionService:
 
     async def _process_via_cv_client(self, filepath: str) -> Tuple[List[Dict[str, Any]], int]:
         """
-        Helper method to invoke CVClient worker and format page OCR/tables into chunk dictionaries.
+        Helper method to invoke CVClient worker and format page OCR/tables into chunk dictionaries
+        with preserved spatial metadata (bounding boxes, page dimensions, block/table IDs).
         """
         all_chunks: List[Dict[str, Any]] = []
         cv_res = await cv_client.run_cv_runner(input_path=filepath, confidence=0.40)
@@ -53,22 +55,79 @@ class DocumentIngestionService:
 
         for page_info in cv_res.pages:
             p_num = page_info.page_number
-            page_text_blocks = [b.text for b in page_info.text_blocks if b.text.strip()]
-            combined_text = " ".join(page_text_blocks)
+            p_w = page_info.width
+            p_h = page_info.height
 
-            # Append Markdown representation of extracted tables
+            # 1. Process OCR text blocks into spatial text chunks
+            valid_blocks = [b for b in page_info.text_blocks if b.text and b.text.strip()]
+            if valid_blocks:
+                chunk_block_groups: List[List[Any]] = []
+                current_group: List[Any] = []
+                current_word_count = 0
+
+                for b in valid_blocks:
+                    words_in_b = len(b.text.split())
+                    if current_group and (current_word_count + words_in_b > 400):
+                        chunk_block_groups.append(current_group)
+                        current_group = [b]
+                        current_word_count = words_in_b
+                    else:
+                        current_group.append(b)
+                        current_word_count += words_in_b
+
+                if current_group:
+                    chunk_block_groups.append(current_group)
+
+                for group in chunk_block_groups:
+                    group_content = " ".join(b.text.strip() for b in group)
+                    ymins = [b.bounding_box_2d[0] for b in group if len(b.bounding_box_2d) >= 4]
+                    xmins = [b.bounding_box_2d[1] for b in group if len(b.bounding_box_2d) >= 4]
+                    ymaxs = [b.bounding_box_2d[2] for b in group if len(b.bounding_box_2d) >= 4]
+                    xmaxs = [b.bounding_box_2d[3] for b in group if len(b.bounding_box_2d) >= 4]
+
+                    union_bbox = [
+                        min(ymins) if ymins else 0,
+                        min(xmins) if xmins else 0,
+                        max(ymaxs) if ymaxs else p_h,
+                        max(xmaxs) if xmaxs else p_w,
+                    ]
+
+                    block_ids = [b.block_id for b in group if hasattr(b, "block_id")]
+
+                    all_chunks.append({
+                        "page_number": p_num,
+                        "content": group_content,
+                        "spatial_metadata": {
+                            "bounding_box_2d": union_bbox,
+                            "page_width": p_w,
+                            "page_height": p_h,
+                            "block_ids": block_ids,
+                            "table_ids": [],
+                            "has_spatial": True
+                        }
+                    })
+
+            # 2. Process Extracted Tables into spatial table chunks
             if page_info.tables:
-                table_mds = []
                 for tbl in page_info.tables:
                     md_str = tbl.get("markdown", "")
-                    if md_str:
-                        table_mds.append(f"\n\n### Extracted Table\n{md_str}")
-                if table_mds:
-                    combined_text = (combined_text + "\n" + "\n".join(table_mds)).strip()
+                    t_bbox = tbl.get("bounding_box_2d", [0, 0, p_h, p_w])
+                    t_id = tbl.get("table_id", f"tbl_{p_num}_01")
 
-            if combined_text:
-                page_chunks = self.chunk_text(combined_text, page_number=p_num)
-                all_chunks.extend(page_chunks)
+                    if md_str:
+                        table_content = f"### Extracted Table ({t_id})\n{md_str}"
+                        all_chunks.append({
+                            "page_number": p_num,
+                            "content": table_content,
+                            "spatial_metadata": {
+                                "bounding_box_2d": t_bbox,
+                                "page_width": p_w,
+                                "page_height": p_h,
+                                "block_ids": [],
+                                "table_ids": [t_id],
+                                "has_spatial": True
+                            }
+                        })
 
         return all_chunks, cv_res.total_pages
 
@@ -209,6 +268,7 @@ class DocumentIngestionService:
             vector_id = f"{document_id}_{chunk_id}"
             content = chunk_info["content"]
             page_no = chunk_info["page_number"]
+            spatial_meta = chunk_info.get("spatial_metadata")
 
             # Compute embedding
             emb = await ollama_client.get_embedding(content)
@@ -216,14 +276,23 @@ class DocumentIngestionService:
             chunk_ids.append(vector_id)
             documents_text.append(content)
             embeddings.append(emb)
-            metadatas.append({
+
+            meta_dict = {
                 "document_id": document_id,
                 "chunk_id": chunk_id,
                 "workspace_id": workspace_id,
                 "filename": filename,
                 "page_number": page_no,
-                "chunk_index": idx
-            })
+                "chunk_index": idx,
+                "has_spatial": bool(spatial_meta and spatial_meta.get("has_spatial"))
+            }
+
+            if spatial_meta and spatial_meta.get("has_spatial"):
+                meta_dict["spatial_bbox"] = json.dumps(spatial_meta.get("bounding_box_2d", [0, 0, 0, 0]))
+                meta_dict["page_width"] = int(spatial_meta.get("page_width", 0))
+                meta_dict["page_height"] = int(spatial_meta.get("page_height", 0))
+
+            metadatas.append(meta_dict)
 
             db_chunk = DocumentChunk(
                 id=chunk_id,
@@ -231,7 +300,8 @@ class DocumentIngestionService:
                 chunk_index=idx,
                 page_number=page_no,
                 raw_content=content,
-                vector_id=vector_id
+                vector_id=vector_id,
+                spatial_metadata=json.dumps(spatial_meta) if spatial_meta else None
             )
             db_chunks.append(db_chunk)
 

@@ -75,6 +75,7 @@ def init_db_sync() -> None:
         page_number INTEGER,
         raw_content TEXT NOT NULL,
         vector_id TEXT NOT NULL,
+        spatial_metadata TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -142,6 +143,12 @@ def init_db_sync() -> None:
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
+
+    # Non-destructive schema migration check for document_chunks.spatial_metadata
+    cursor.execute("PRAGMA table_info(document_chunks)")
+    existing_cols = [col[1] for col in cursor.fetchall()]
+    if "spatial_metadata" not in existing_cols:
+        cursor.execute("ALTER TABLE document_chunks ADD COLUMN spatial_metadata TEXT;")
 
     # Seed default workspace if missing
     cursor.execute("SELECT id FROM workspaces WHERE id = 'default_workspace'")

@@ -147,7 +147,11 @@ class VectorStoreService:
                             "document_id": meta.get("document_id", ""),
                             "page_number": meta.get("page_number", 1),
                             "score": score,
-                            "content": docs_list[i] if i < len(docs_list) else ""
+                            "content": docs_list[i] if i < len(docs_list) else "",
+                            "spatial_bbox": meta.get("spatial_bbox"),
+                            "page_width": meta.get("page_width"),
+                            "page_height": meta.get("page_height"),
+                            "has_spatial": meta.get("has_spatial", False)
                         })
 
                 if matches:
@@ -162,12 +166,17 @@ class VectorStoreService:
             if document_ids and it["metadata"].get("document_id") not in document_ids:
                 continue
             sim = cosine_similarity(query_embedding, it["embedding"])
+            meta = it.get("metadata", {})
             scored.append({
                 "chunk_id": it["id"],
-                "document_id": it["metadata"].get("document_id", ""),
-                "page_number": it["metadata"].get("page_number", 1),
+                "document_id": meta.get("document_id", ""),
+                "page_number": meta.get("page_number", 1),
                 "score": round(sim, 3),
-                "content": it["document"]
+                "content": it["document"],
+                "spatial_bbox": meta.get("spatial_bbox"),
+                "page_width": meta.get("page_width"),
+                "page_height": meta.get("page_height"),
+                "has_spatial": meta.get("has_spatial", False)
             })
 
         scored.sort(key=lambda x: x["score"], reverse=True)

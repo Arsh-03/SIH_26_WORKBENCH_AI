@@ -43,6 +43,7 @@ class DocumentChunk(Base):
     page_number = Column(Integer, nullable=True)
     raw_content = Column(Text, nullable=False)
     vector_id = Column(String, nullable=False)
+    spatial_metadata = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     # Relationships
