@@ -74,26 +74,33 @@ def main():
                     total_pages = len(pdf.pages)
                     for page_idx, page in enumerate(pdf.pages):
                         p_num = page_idx + 1
-                        p_w, p_h = int(page.width), int(page.height)
 
-                        # Render page image for PaddleOCR
-                        page_img = page.to_image(resolution=150)
-                        temp_img_path = input_path.parent / f"_temp_p{p_num}_{input_path.stem}.png"
-                        page_img.save(str(temp_img_path))
+                        # Render page image in memory for PaddleOCR
+                        page_img_obj = page.to_image(resolution=150)
+                        pil_img = page_img_obj.original.convert("RGB")
+                        p_w, p_h = pil_img.width, pil_img.height
 
-                        try:
-                            text_blocks = ocr_processor.process_image(
-                                str(temp_img_path),
-                                confidence_threshold=args.confidence
+                        text_blocks = ocr_processor.process_image(
+                            pil_img,
+                            confidence_threshold=args.confidence
+                        )
+
+                        # Native pdfplumber table extraction with pixel scaling
+                        tables = table_extractor.extract_tables_from_pdf(
+                            str(input_path),
+                            page_number=p_num,
+                            image_width=p_w,
+                            image_height=p_h
+                        )
+
+                        # Fallback to conservative OCR table reconstruction if zero native tables found
+                        if not tables and text_blocks:
+                            tables = table_extractor.extract_tables_from_ocr(
+                                text_blocks=text_blocks,
+                                page_width=p_w,
+                                page_height=p_h,
+                                page_number=p_num
                             )
-                        finally:
-                            if temp_img_path.exists():
-                                try:
-                                    os.remove(temp_img_path)
-                                except OSError:
-                                    pass
-
-                        tables = table_extractor.extract_tables_from_pdf(str(input_path), page_number=p_num)
 
                         pages_output.append({
                             "page_number": p_num,
@@ -114,12 +121,20 @@ def main():
                 confidence_threshold=args.confidence
             )
 
+            # OCR table reconstruction for image inputs
+            tables = table_extractor.extract_tables_from_ocr(
+                text_blocks=text_blocks,
+                page_width=width,
+                page_height=height,
+                page_number=1
+            )
+
             pages_output.append({
                 "page_number": 1,
                 "width": width,
                 "height": height,
                 "text_blocks": text_blocks,
-                "tables": []
+                "tables": tables
             })
 
     except Exception as e:

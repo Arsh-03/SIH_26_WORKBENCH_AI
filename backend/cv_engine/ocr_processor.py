@@ -1,14 +1,16 @@
 import os
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
+from PIL import Image
+import numpy as np
 
 logger = logging.getLogger("ocr_processor")
 
 class OCRProcessor:
     """
     PaddleOCR Engine wrapper providing 2D spatial bounding boxes [ymin, xmin, ymax, xmax]
-    and offline model initialization capability.
+    and offline model initialization capability. Supports string filepaths, PIL Images, and numpy arrays.
     """
     def __init__(self, model_dir: Optional[str] = None, use_gpu: bool = False):
         self.model_dir = Path(model_dir) if model_dir else None
@@ -50,14 +52,25 @@ class OCRProcessor:
 
     def process_image(
         self,
-        image_path: str,
+        image_input: Union[str, Path, Image.Image, np.ndarray],
         confidence_threshold: float = 0.50
     ) -> List[Dict[str, Any]]:
         """
-        Run OCR on an image file and convert bounding polygons into [ymin, xmin, ymax, xmax].
+        Run OCR on an image file, PIL Image, or numpy array and convert bounding polygons into [ymin, xmin, ymax, xmax].
         """
         self.initialize()
-        results = self.ocr_engine.ocr(image_path, cls=True)
+
+        if isinstance(image_input, (str, Path)):
+            ocr_target = str(image_input)
+        elif isinstance(image_input, Image.Image):
+            rgb_img = image_input.convert("RGB")
+            ocr_target = np.array(rgb_img)
+        elif isinstance(image_input, np.ndarray):
+            ocr_target = image_input
+        else:
+            raise ValueError(f"Unsupported image_input type: {type(image_input)}")
+
+        results = self.ocr_engine.ocr(ocr_target, cls=True)
 
         text_blocks: List[Dict[str, Any]] = []
         if not results or not results[0]:
